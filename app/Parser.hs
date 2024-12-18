@@ -28,34 +28,24 @@ parseVisibility = do
 
 parseDeclarationValue :: Parser DeclarationValue
 parseDeclarationValue =
-  parseVarDecl
-  <|> parseFuncDecl
-  <|> parseVarDef
+  parseVarDef
   <|> parseFuncDef
   <|> parseEnumDecl
 
 parseVarDef :: Parser DeclarationValue
-parseVarDef = VarDef <$> parseVariableDefinition
-
-parseVarDecl :: Parser DeclarationValue
-parseVarDecl = do
-  variableDefinition <- parseVariableDefinition
-  symbol "="
-  VarDecl variableDefinition <$> parseExpression
+parseVarDef = VarDeclarationValue <$> parseVariableDefinition
 
 parseFuncDef :: Parser DeclarationValue
-parseFuncDef = FuncDef <$> parseFunctionDefinition
-
-parseFuncDecl :: Parser DeclarationValue
-parseFuncDecl = do
-  functionDefinition <- parseFunctionDefinition
-  FuncDecl functionDefinition <$> parseFunctionBody
+parseFuncDef = FuncDeclarationValue <$> parseFunctionDefinition
 
 parseEnumDecl :: Parser DeclarationValue
-parseEnumDecl = EnumDecl <$> parseEnumDefinition
+parseEnumDecl = EnumDeclarationValue <$> parseEnumDefinition
 
 parseVariableDefinition :: Parser VariableDefinition
-parseVariableDefinition = VariableDefinition <$> parseType
+parseVariableDefinition = do
+  typ <- parseType
+  initializer <- optionMaybe $ symbol "=" *> parseExpression
+  return $ VariableDefinition typ initializer
 
 parseFunctionDefinition :: Parser FunctionDefinition
 parseFunctionDefinition = do
@@ -66,7 +56,8 @@ parseFunctionDefinition = do
   typ <- option Void $ do
     symbol "->"
     parseType
-  return $ FunctionDefinition parameters typ
+  functionBody <- optionMaybe parseFunctionBody
+  return $ FunctionDefinition parameters typ functionBody
 
 parseFunctionBody :: Parser FunctionBody
 parseFunctionBody = do
@@ -108,18 +99,10 @@ parseInnerDeclaration = do
   InnerDeclaration x <$> parseInnerDeclarationValue
 
 parseInnerDeclarationValue :: Parser InnerDeclarationValue
-parseInnerDeclarationValue =
-  parseInnerVarDecl
-  <|> parseInnerVarDef
+parseInnerDeclarationValue = parseInnerVarDef
 
 parseInnerVarDef :: Parser InnerDeclarationValue
-parseInnerVarDef = InnerVarDef <$> parseVariableDefinition
-
-parseInnerVarDecl :: Parser InnerDeclarationValue
-parseInnerVarDecl = do
-  variableDefinition <- parseVariableDefinition
-  symbol "="
-  InnerVarDecl variableDefinition <$> parseExpression
+parseInnerVarDef = InnerVarDeclarationValue <$> parseVariableDefinition
 
 parseStatement :: Parser Statement
 parseStatement = choice

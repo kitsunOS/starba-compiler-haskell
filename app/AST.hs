@@ -21,29 +21,28 @@ data Visibility =
   deriving (Show, Eq)
 
 data DeclarationValue =
-  VarDef VariableDefinition |
-  VarDecl VariableDefinition Expression |
-  FuncDef FunctionDefinition |
-  FuncDecl FunctionDefinition FunctionBody |
-  EnumDecl EnumDefinition
+  VarDeclarationValue VariableDefinition |
+  FuncDeclarationValue FunctionDefinition |
+  EnumDeclarationValue EnumDefinition
   deriving (Show, Eq)
 
-data InnerDeclarationValue =
-  InnerVarDef VariableDefinition |
-  InnerVarDecl VariableDefinition Expression
+newtype InnerDeclarationValue =
+  InnerVarDeclarationValue VariableDefinition
   deriving (Show, Eq)
 
-newtype VariableDefinition = VariableDefinition {
-  variableType :: Type
+data VariableDefinition = VariableDefinition {
+  variableType :: Type,
+  initializer :: Maybe Expression
 } deriving (Show, Eq)
 
 data FunctionDefinition = FunctionDefinition {
-  functionParameters :: [VariableDefinition],
-  functionType :: Type
+  functionDefParameters :: [VariableDefinition],
+  functionDefType :: Type,
+  functionDefBody :: Maybe FunctionBody
 } deriving (Show, Eq)
 
 newtype FunctionBody = FunctionBody {
-  functionBody :: [Statement]
+  functionBodyStatements :: [Statement]
 } deriving (Show, Eq)
 
 data EnumDefinition = EnumDefinition {
