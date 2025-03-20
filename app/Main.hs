@@ -7,6 +7,7 @@ import Text.Parsec
 
 import Parser
 import AST
+import IRCompiler (compileModule)
 
 main :: IO ()
 main = do
@@ -16,5 +17,8 @@ main = do
       contents <- readFile filename
       case parse parseModule filename contents of
         Left err -> hPrint stderr err
-        Right ast -> print ast
+        Right ast -> do
+          print ast
+          print ""
+          print $ compileModule ast
     _ -> hPutStrLn stderr "Usage: starba <filename>"

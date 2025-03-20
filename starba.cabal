@@ -22,7 +22,7 @@ maintainer:         jasontopia03@gmail.com
 
 executable starba
     main-is:          Main.hs
-    other-modules:    Parser, AST, Lexer
+    other-modules:    Parser, AST, Lexer, IR, IRCompiler
 
     -- Modules included in this executable, other than Main.
     -- other-modules:
@@ -30,6 +30,7 @@ executable starba
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
     build-depends:    base >= 4.17.2 && < 4.18,
-                      parsec >= 3.1.16 && < 3.2
+                      parsec >= 3.1.16 && < 3.2,
+                      containers >= 0.6.4 && < 0.7,
     hs-source-dirs:   app
     default-language: Haskell2010
