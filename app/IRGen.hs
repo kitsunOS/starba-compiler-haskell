@@ -10,8 +10,9 @@ compileModule (AST.Module decls) =
     declContributions = map compileDeclaration decls
     procedures = concatMap declProcedures declContributions
     symbolTable = mergeSymbolTables $ map declSymbolTable declContributions
+    fieldTable = mergeFieldTables $ map declFieldTable declContributions
   in
-    IR.Module procedures symbolTable
+    IR.Module procedures fieldTable symbolTable
 
 compileDeclaration :: AST.Declaration -> DeclarationContribution
 compileDeclaration (AST.Declaration name visibility value) =
@@ -27,9 +28,9 @@ compileVarDeclaration :: String -> AST.Visibility -> AST.VariableDefinition -> D
 compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
   let
     -- TODO: Evaluate the actual initializer
-    symbolTable = SymbolTable $ Map.singleton name (IntLiteral 0)
+    fieldTable = FieldTable $ Map.singleton name (IntLiteral 0)
   in
-    DeclarationContribution [] symbolTable
+    DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
   
 compileFuncDeclaration :: String -> AST.Visibility -> AST.FunctionDefinition -> DeclarationContribution
 compileFuncDeclaration name visibility (AST.FunctionDefinition params typ bodyMaybe) =
@@ -37,15 +38,16 @@ compileFuncDeclaration name visibility (AST.FunctionDefinition params typ bodyMa
     Nothing -> error "Function declaration without body not yet supported"
     Just body ->
       let
-        symbolTable = SymbolTable Map.empty
+        symbolTable = SymbolTable Map.empty Map.empty
         (instructions, symbolTable') = compileFuncBody body symbolTable
       in
-        DeclarationContribution [Procedure instructions] symbolTable'
+        DeclarationContribution [Procedure instructions] symbolTable' (FieldTable Map.empty)
   
 compileFuncBody :: AST.FunctionBody -> SymbolTable -> ([Instruction], SymbolTable)
 compileFuncBody (AST.FunctionBody stmts) symbolTable =
   let
-    function = foldl compileStatement (PartialFunction [] symbolTable (FuncBodyContext Map.empty (RegName "a" 0) (LabelRef "entry"))) stmts
+    funcBodyContext = FuncBodyContext Map.empty (RegName "a" 0) (LabelRef "entry") "a"
+    function = foldl compileStatement (PartialFunction [] symbolTable funcBodyContext) stmts
   in
     case function of
       PartialFunction instructions symbolTable _ -> (instructions, symbolTable)
@@ -67,20 +69,21 @@ compileInnerVarDeclaration :: PartialFunction -> String -> AST.VariableDefinitio
 compileInnerVarDeclaration partialFunction name (AST.VariableDefinition typ Nothing) = error "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration partialFunction name (AST.VariableDefinition typ (Just initializer)) =
   let
-    (regName, PartialFunction instructions symbolTable context) = compileExpression partialFunction initializer
+    (regName, partialFunction') = compileExpression partialFunction initializer
+    context = pfContext partialFunction'
     varRef = VarRef name 0
     newActiveRegisters = Map.alter updateInnerMap varRef (activeRegisters context)
       where
         updateInnerMap Nothing = Just $ Map.singleton (activeLabel context) regName
         updateInnerMap (Just labelMap) = Just $ Map.insert (activeLabel context) regName labelMap
-    context' = FuncBodyContext newActiveRegisters (nextRegister context) (activeLabel context)
+    context' = context { activeRegisters = newActiveRegisters }
   in
-    PartialFunction instructions symbolTable context'
+    partialFunction' { pfContext = context' }
 
 compileEnumDeclaration :: String -> AST.Visibility -> AST.EnumDefinition -> DeclarationContribution
 compileEnumDeclaration name visibility (AST.EnumDefinition _ values members) =
   -- TODO: Implement
-  DeclarationContribution [] (SymbolTable Map.empty)
+  DeclarationContribution [] (SymbolTable Map.empty Map.empty) (FieldTable Map.empty)
 
 compileExpression :: PartialFunction -> AST.Expression -> (RegName, PartialFunction)
 compileExpression partialFunction (NumberLiteral num) =
@@ -92,18 +95,25 @@ compileExpression partialFunction (NumberLiteral num) =
     (regName, PartialFunction instructions' symbolTable context')
 compileExpression partialFunction (AST.StringLiteral str) =
   let
-    (PartialFunction instructions symbolTable context) = partialFunction
-    (regName, context') = allocateRegister context
-    instructions' = instructions ++ [Set (Register regName) (SymbolReference (Symbol str))]
+    (symbolName, partialFunction') = allocateSymbol partialFunction str
+    (regName, context') = allocateRegister (pfContext partialFunction')
+    instructions' = pfInstructions partialFunction' ++ [Set (Register regName) (SymbolReference symbolName)]
   in
-    (regName, PartialFunction instructions' symbolTable context')
+    (regName, partialFunction' { pfInstructions = instructions' })
 
 mergeSymbolTables :: [SymbolTable] -> SymbolTable
-mergeSymbolTables = foldl mergeSymbolTable (SymbolTable Map.empty)
+mergeSymbolTables = foldl mergeSymbolTable (SymbolTable Map.empty Map.empty)
 
 mergeSymbolTable :: SymbolTable -> SymbolTable -> SymbolTable
-mergeSymbolTable (SymbolTable table1) (SymbolTable table2) =
-  SymbolTable $ Map.union table1 table2
+mergeSymbolTable (SymbolTable symbolMap1 reverseMap1) (SymbolTable symbolMap2 reverseMap2) =
+  SymbolTable (Map.union symbolMap1 symbolMap2) (Map.union reverseMap1 reverseMap2)
+
+mergeFieldTables :: [FieldTable] -> FieldTable
+mergeFieldTables = foldl mergeFieldTable (FieldTable Map.empty)
+
+mergeFieldTable :: FieldTable -> FieldTable -> FieldTable
+mergeFieldTable (FieldTable fieldMap1) (FieldTable fieldMap2) =
+  FieldTable (Map.union fieldMap1 fieldMap2)
 
 allocateRegister :: FuncBodyContext -> (RegName, FuncBodyContext)
 allocateRegister funcBodyContext =
@@ -111,7 +121,30 @@ allocateRegister funcBodyContext =
     regName = nextRegister funcBodyContext
     nextRegister' = nextRegName (nextRegister funcBodyContext)
   in
-    (regName, FuncBodyContext (activeRegisters funcBodyContext) nextRegister' (activeLabel funcBodyContext))
+    (regName, funcBodyContext { nextRegister = nextRegister' })
+
+allocateSymbol :: PartialFunction -> String -> (String, PartialFunction)
+allocateSymbol partialFunction value =
+  let
+    context = pfContext partialFunction
+    currentSymbolTable = pfSymbolTable partialFunction
+    lit = IR.StringLiteral value
+    existingSymbol = Map.lookup lit (reverseMap currentSymbolTable)
+  in case existingSymbol of
+    Just name -> (name, partialFunction)  -- Reuse existing symbol
+    Nothing ->
+      let
+        symbolName = nextSymbolName context
+        symbolMap' = Map.insert symbolName lit (symbolMap currentSymbolTable)
+        reverseMap' = Map.insert lit symbolName (reverseMap currentSymbolTable)
+        symbolTable' = SymbolTable symbolMap' reverseMap'
+        context' = context { nextSymbolName = incrementRegName symbolName }
+      in
+        (symbolName, partialFunction {
+          pfSymbolTable = symbolTable',
+          pfContext = context'
+        })
+
 
 nextRegName :: RegName -> RegName
 nextRegName (RegName prefix num) =
@@ -126,14 +159,19 @@ incrementRegName = reverse . increment . reverse
 
 data DeclarationContribution = DeclarationContribution {
   declProcedures :: [Procedure],
-  declSymbolTable :: SymbolTable
+  declSymbolTable :: SymbolTable,
+  declFieldTable :: FieldTable
 }
 
 data FuncBodyContext = FuncBodyContext {
   activeRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
   nextRegister :: RegName,
-  activeLabel :: LabelRef
+  activeLabel :: LabelRef,
+  nextSymbolName :: String
 } deriving (Show)
 
-data PartialFunction = PartialFunction [Instruction] SymbolTable FuncBodyContext 
-  deriving (Show)
+data PartialFunction = PartialFunction {
+  pfInstructions :: [Instruction],
+  pfSymbolTable :: SymbolTable,
+  pfContext :: FuncBodyContext
+} deriving (Show)

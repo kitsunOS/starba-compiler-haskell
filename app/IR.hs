@@ -1,7 +1,7 @@
 module IR where
 import Data.Map (Map)
 
-data Module = Module [Procedure] SymbolTable
+data Module = Module [Procedure] FieldTable SymbolTable
   deriving (Show, Eq)
 
 newtype Procedure = Procedure [Instruction]
@@ -14,7 +14,7 @@ data Value
   = Register RegName
   | Immediate Integer
   | LabelReference LabelRef
-  | SymbolReference Symbol
+  | SymbolReference String
   deriving (Show, Eq)
 
 data VarRef = VarRef String Integer
@@ -35,8 +35,13 @@ data Instruction
 data Literal
   = IntLiteral Int
   | StringLiteral String
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
-newtype SymbolTable = SymbolTable {
-  table :: Map String Literal
+data SymbolTable = SymbolTable {
+  symbolMap :: Map String Literal,
+  reverseMap :: Map Literal String
+} deriving (Show, Eq)
+
+newtype FieldTable = FieldTable {
+  fieldMap :: Map String Literal
 } deriving (Show, Eq)
