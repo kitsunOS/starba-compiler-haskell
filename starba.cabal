@@ -32,5 +32,6 @@ executable starba
     build-depends:    base >= 4.17.2 && < 4.18,
                       parsec >= 3.1.16 && < 3.2,
                       containers >= 0.6.4 && < 0.7,
+                      mtl >= 2.2.2 && < 2.3,
     hs-source-dirs:   app
     default-language: Haskell2010

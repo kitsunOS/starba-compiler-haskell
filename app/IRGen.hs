@@ -3,104 +3,54 @@ module IRGen (compileModule) where
 import AST
 import IR
 import qualified Data.Map as Map
+import Control.Monad.State
+import Control.Monad.Except
 
-compileModule :: AST.Module -> IR.Module
-compileModule (AST.Module decls) =
-  let
-    declContributions = map compileDeclaration decls
-    procedures = concatMap declProcedures declContributions
-    symbolTable = mergeSymbolTables $ map declSymbolTable declContributions
-    fieldTable = mergeFieldTables $ map declFieldTable declContributions
-  in
-    IR.Module procedures fieldTable symbolTable
+-- Data types
+data IRGenD = IRGen {
+  irgInstructions :: [Instruction],
+  irgSymbolTable :: SymbolTable,
+  irgNextRegister :: RegName,
+  irgNextSymbolName :: String,
+  irgActiveRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
+  irgActiveLabel :: LabelRef
+}
+type IRGenM = StateT IRGenD (Except String)
+defaultState :: IRGenD
+defaultState = IRGen [] (SymbolTable Map.empty Map.empty) (RegName "a" 0) "a" Map.empty (LabelRef "entry")
 
-compileDeclaration :: AST.Declaration -> DeclarationContribution
-compileDeclaration (AST.Declaration name visibility value) =
-  case value of
-    AST.VarDeclarationValue varDef ->
-      compileVarDeclaration name visibility varDef
-    AST.FuncDeclarationValue funcDef ->
-      compileFuncDeclaration name visibility funcDef
-    AST.EnumDeclarationValue enumDef ->
-      compileEnumDeclaration name visibility enumDef
+data DeclarationContribution = DeclarationContribution {
+  declProcedures :: [Procedure],
+  declSymbolTable :: SymbolTable,
+  declFieldTable :: FieldTable
+}
 
-compileVarDeclaration :: String -> AST.Visibility -> AST.VariableDefinition -> DeclarationContribution
-compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
-  let
-    -- TODO: Evaluate the actual initializer
-    fieldTable = FieldTable $ Map.singleton name (IntLiteral 0)
-  in
-    DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
-  
-compileFuncDeclaration :: String -> AST.Visibility -> AST.FunctionDefinition -> DeclarationContribution
-compileFuncDeclaration name visibility (AST.FunctionDefinition params typ bodyMaybe) =
-  case bodyMaybe of
-    Nothing -> error "Function declaration without body not yet supported"
-    Just body ->
-      let
-        symbolTable = SymbolTable Map.empty Map.empty
-        (instructions, symbolTable') = compileFuncBody body symbolTable
-      in
-        DeclarationContribution [Procedure instructions] symbolTable' (FieldTable Map.empty)
-  
-compileFuncBody :: AST.FunctionBody -> SymbolTable -> ([Instruction], SymbolTable)
-compileFuncBody (AST.FunctionBody stmts) symbolTable =
-  let
-    funcBodyContext = FuncBodyContext Map.empty (RegName "a" 0) (LabelRef "entry") "a"
-    function = foldl compileStatement (PartialFunction [] symbolTable funcBodyContext) stmts
-  in
-    case function of
-      PartialFunction instructions symbolTable _ -> (instructions, symbolTable)
-    
-  
-compileStatement :: PartialFunction -> AST.Statement -> PartialFunction
-compileStatement partialFunction stmt =
-  case stmt of
-    AST.InnerDecl innerDecl ->
-      compileInnerDeclaration partialFunction innerDecl
+-- IRGen helpers
+getNextRegister :: IRGenM RegName
+getNextRegister = do
+  regName <- gets irgNextRegister
+  modify $ \s -> s { irgNextRegister = nextRegName regName }
+  return regName
 
-compileInnerDeclaration :: PartialFunction -> AST.InnerDeclaration -> PartialFunction
-compileInnerDeclaration partialFunction (AST.InnerDeclaration name value) =
-  case value of
-    AST.InnerVarDeclarationValue varDef ->
-      compileInnerVarDeclaration partialFunction name varDef
+addInstruction :: Instruction -> IRGenM ()
+addInstruction instruction = modify $ \s -> s { irgInstructions = instruction : irgInstructions s }
 
-compileInnerVarDeclaration :: PartialFunction -> String -> AST.VariableDefinition -> PartialFunction
-compileInnerVarDeclaration partialFunction name (AST.VariableDefinition typ Nothing) = error "Inner variable declaration without initializer not yet supported"
-compileInnerVarDeclaration partialFunction name (AST.VariableDefinition typ (Just initializer)) =
-  let
-    (regName, partialFunction') = compileExpression partialFunction initializer
-    context = pfContext partialFunction'
-    varRef = VarRef name 0
-    newActiveRegisters = Map.alter updateInnerMap varRef (activeRegisters context)
-      where
-        updateInnerMap Nothing = Just $ Map.singleton (activeLabel context) regName
-        updateInnerMap (Just labelMap) = Just $ Map.insert (activeLabel context) regName labelMap
-    context' = context { activeRegisters = newActiveRegisters }
-  in
-    partialFunction' { pfContext = context' }
+allocateSymbol :: String -> IRGenM String
+allocateSymbol value = do
+  symbolName <- gets irgNextSymbolName
+  symbolTable <- gets irgSymbolTable
+  let lit = IR.StringLiteral value
+      existingSymbol = Map.lookup lit (reverseMap symbolTable)
+  case existingSymbol of
+    Just name -> return name
+    Nothing -> do
+      let symbolMap' = Map.insert symbolName lit (symbolMap symbolTable)
+          reverseMap' = Map.insert lit symbolName (reverseMap symbolTable)
+          symbolTable' = SymbolTable symbolMap' reverseMap'
+      modify $ \s -> s { irgSymbolTable = symbolTable', irgNextSymbolName = incrementRegName symbolName }
+      return symbolName
 
-compileEnumDeclaration :: String -> AST.Visibility -> AST.EnumDefinition -> DeclarationContribution
-compileEnumDeclaration name visibility (AST.EnumDefinition _ values members) =
-  -- TODO: Implement
-  DeclarationContribution [] (SymbolTable Map.empty Map.empty) (FieldTable Map.empty)
-
-compileExpression :: PartialFunction -> AST.Expression -> (RegName, PartialFunction)
-compileExpression partialFunction (NumberLiteral num) =
-  let
-    (PartialFunction instructions symbolTable context) = partialFunction
-    (regName, context') = allocateRegister context
-    instructions' = instructions ++ [Set (Register regName) (Immediate num)]
-  in
-    (regName, PartialFunction instructions' symbolTable context')
-compileExpression partialFunction (AST.StringLiteral str) =
-  let
-    (symbolName, partialFunction') = allocateSymbol partialFunction str
-    (regName, context') = allocateRegister (pfContext partialFunction')
-    instructions' = pfInstructions partialFunction' ++ [Set (Register regName) (SymbolReference symbolName)]
-  in
-    (regName, partialFunction' { pfInstructions = instructions' })
-
+-- Small helpers
 mergeSymbolTables :: [SymbolTable] -> SymbolTable
 mergeSymbolTables = foldl mergeSymbolTable (SymbolTable Map.empty Map.empty)
 
@@ -115,37 +65,6 @@ mergeFieldTable :: FieldTable -> FieldTable -> FieldTable
 mergeFieldTable (FieldTable fieldMap1) (FieldTable fieldMap2) =
   FieldTable (Map.union fieldMap1 fieldMap2)
 
-allocateRegister :: FuncBodyContext -> (RegName, FuncBodyContext)
-allocateRegister funcBodyContext =
-  let
-    regName = nextRegister funcBodyContext
-    nextRegister' = nextRegName (nextRegister funcBodyContext)
-  in
-    (regName, funcBodyContext { nextRegister = nextRegister' })
-
-allocateSymbol :: PartialFunction -> String -> (String, PartialFunction)
-allocateSymbol partialFunction value =
-  let
-    context = pfContext partialFunction
-    currentSymbolTable = pfSymbolTable partialFunction
-    lit = IR.StringLiteral value
-    existingSymbol = Map.lookup lit (reverseMap currentSymbolTable)
-  in case existingSymbol of
-    Just name -> (name, partialFunction)  -- Reuse existing symbol
-    Nothing ->
-      let
-        symbolName = nextSymbolName context
-        symbolMap' = Map.insert symbolName lit (symbolMap currentSymbolTable)
-        reverseMap' = Map.insert lit symbolName (reverseMap currentSymbolTable)
-        symbolTable' = SymbolTable symbolMap' reverseMap'
-        context' = context { nextSymbolName = incrementRegName symbolName }
-      in
-        (symbolName, partialFunction {
-          pfSymbolTable = symbolTable',
-          pfContext = context'
-        })
-
-
 nextRegName :: RegName -> RegName
 nextRegName (RegName prefix num) =
   RegName (incrementRegName prefix) 0
@@ -157,21 +76,76 @@ incrementRegName = reverse . increment . reverse
     increment ('z':xs) = 'a' : increment xs
     increment (x:xs) = succ x : xs
 
-data DeclarationContribution = DeclarationContribution {
-  declProcedures :: [Procedure],
-  declSymbolTable :: SymbolTable,
-  declFieldTable :: FieldTable
-}
+-- Compilation
+compileModule :: AST.Module -> Either String IR.Module
+compileModule (AST.Module decls) = do
+  let compile = mapM compileDeclaration decls
+  case runExcept (evalStateT compile defaultState) of
+    Left err -> Left err
+    Right contributions ->
+      let procedures = concatMap declProcedures contributions
+          symbolTable = mergeSymbolTables $ map declSymbolTable contributions
+          fieldTable = mergeFieldTables $ map declFieldTable contributions
+      in Right $ IR.Module procedures fieldTable symbolTable
 
-data FuncBodyContext = FuncBodyContext {
-  activeRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
-  nextRegister :: RegName,
-  activeLabel :: LabelRef,
-  nextSymbolName :: String
-} deriving (Show)
+compileDeclaration :: AST.Declaration -> IRGenM DeclarationContribution
+compileDeclaration (AST.Declaration name visibility value) =
+  case value of
+    AST.VarDeclarationValue varDef -> compileVarDeclaration name visibility varDef
+    AST.FuncDeclarationValue funcDef -> compileFuncDeclaration name visibility funcDef
+    AST.EnumDeclarationValue enumDef -> compileEnumDeclaration name visibility enumDef
 
-data PartialFunction = PartialFunction {
-  pfInstructions :: [Instruction],
-  pfSymbolTable :: SymbolTable,
-  pfContext :: FuncBodyContext
-} deriving (Show)
+compileVarDeclaration :: String -> AST.Visibility -> AST.VariableDefinition -> IRGenM DeclarationContribution
+compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
+  let
+    -- TODO: Evaluate the actual initializer
+    fieldTable = FieldTable $ Map.singleton name (IntLiteral 0)
+  in
+    return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
+
+compileEnumDeclaration :: String -> AST.Visibility -> AST.EnumDefinition -> IRGenM DeclarationContribution
+compileEnumDeclaration name visibility (AST.EnumDefinition _ values members) =
+  -- TODO: Implement
+  return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) (FieldTable Map.empty)
+
+compileFuncDeclaration :: String -> AST.Visibility -> AST.FunctionDefinition -> IRGenM DeclarationContribution
+compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ Nothing) = throwError "Function declaration without body not yet supported"
+compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ (Just body)) = do
+  compileFuncBody body
+  instructions <- gets (reverse . irgInstructions)
+  symbolTable <- gets irgSymbolTable
+  return $ DeclarationContribution [Procedure instructions] symbolTable (FieldTable Map.empty)
+
+compileFuncBody :: AST.FunctionBody -> IRGenM ()
+compileFuncBody (AST.FunctionBody stmts) = mapM_ compileStatement stmts
+
+compileStatement :: AST.Statement -> IRGenM ()
+compileStatement (AST.InnerDecl innerDecl) = compileInnerDeclaration innerDecl
+
+compileInnerDeclaration :: AST.InnerDeclaration -> IRGenM ()
+compileInnerDeclaration (AST.InnerDeclaration name (AST.InnerVarDeclarationValue varDef)) = compileInnerVarDeclaration name varDef
+
+compileInnerVarDeclaration :: String -> AST.VariableDefinition -> IRGenM ()
+compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
+compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
+  regName <- compileExpression initializer
+  let varRef = VarRef name 0
+  originalActiveRegisters <- gets irgActiveRegisters
+  activeLabel <- gets irgActiveLabel
+  let newActiveRegisters = Map.alter updateInnerMap varRef originalActiveRegisters
+        where
+          updateInnerMap Nothing = Just $ Map.singleton activeLabel regName
+          updateInnerMap (Just labelMap) = Just $ Map.insert activeLabel regName labelMap
+  modify $ \s -> s { irgActiveRegisters = newActiveRegisters }
+
+compileExpression :: AST.Expression -> IRGenM RegName
+compileExpression (NumberLiteral num) = do
+  regName <- getNextRegister
+  addInstruction $ Set (Register regName) (Immediate num)
+  return regName
+
+compileExpression (AST.StringLiteral str) = do
+  symbolName <- allocateSymbol str
+  regName <- getNextRegister
+  addInstruction $ Set (Register regName) (SymbolReference symbolName)
+  return regName
