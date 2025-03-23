@@ -7,7 +7,7 @@ import Text.Parsec
 
 import Parser
 import AST
-import IRCompiler (compileModule)
+import IRGen (compileModule)
 
 main :: IO ()
 main = do

@@ -12,13 +12,16 @@ data RegName = RegName String Int
 
 data Value
   = Register RegName
-  | Immediate Int
+  | Immediate Integer
   | LabelReference LabelRef
   | SymbolReference Symbol
   deriving (Show, Eq)
 
+data VarRef = VarRef String Integer
+  deriving (Show, Eq, Ord)
+
 newtype LabelRef = LabelRef String
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 newtype Symbol = Symbol String
   deriving (Show, Eq)
