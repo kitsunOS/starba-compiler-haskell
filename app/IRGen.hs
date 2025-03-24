@@ -8,7 +8,7 @@ import Control.Monad.Except
 
 -- Data types
 data IRGenD = IRGen {
-  irgInstructions :: [Instruction],
+  irgBlocks :: [Block],
   irgSymbolTable :: SymbolTable,
   irgNextRegister :: RegName,
   irgNextSymbolName :: String,
@@ -33,7 +33,13 @@ getNextRegister = do
   return regName
 
 addInstruction :: Instruction -> IRGenM ()
-addInstruction instruction = modify $ \s -> s { irgInstructions = instruction : irgInstructions s }
+addInstruction instruction = modify $ \s -> s { irgBlocks = addInstructionToBlock instruction (irgBlocks s) (irgActiveLabel s) }
+
+addInstructionToBlock :: Instruction -> [Block] -> LabelRef -> [Block]
+addInstructionToBlock instruction [] label = [Block label [instruction]]
+addInstructionToBlock instruction (Block label instructions : blocks) activeLabel
+  | label == activeLabel = Block label (instruction : instructions) : blocks
+  | otherwise = Block label instructions : addInstructionToBlock instruction blocks activeLabel
 
 allocateSymbol :: String -> IRGenM String
 allocateSymbol value = do
@@ -112,9 +118,10 @@ compileFuncDeclaration :: String -> AST.Visibility -> AST.FunctionDefinition -> 
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ Nothing) = throwError "Function declaration without body not yet supported"
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ (Just body)) = do
   compileFuncBody body
-  instructions <- gets (reverse . irgInstructions)
+  let reverseBlock (Block label instructions) = Block label (reverse instructions)
+  blocks <- gets (map reverseBlock . reverse . irgBlocks)
   symbolTable <- gets irgSymbolTable
-  return $ DeclarationContribution [Procedure instructions] symbolTable (FieldTable Map.empty)
+  return $ DeclarationContribution [Procedure blocks] symbolTable (FieldTable Map.empty)
 
 compileFuncBody :: AST.FunctionBody -> IRGenM ()
 compileFuncBody (AST.FunctionBody stmts) = mapM_ compileStatement stmts

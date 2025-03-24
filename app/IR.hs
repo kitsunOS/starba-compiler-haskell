@@ -4,7 +4,10 @@ import Data.Map (Map)
 data Module = Module [Procedure] FieldTable SymbolTable
   deriving (Show, Eq)
 
-newtype Procedure = Procedure [Instruction]
+newtype Procedure = Procedure [Block]
+  deriving (Show, Eq)
+
+data Block = Block LabelRef [Instruction]
   deriving (Show, Eq)
 
 data RegName = RegName String Int
@@ -27,8 +30,7 @@ newtype Symbol = Symbol String
   deriving (Show, Eq)
 
 data Instruction
-  = Label LabelRef
-  | Ret Value
+  = Ret Value
   | Set Value Value
   deriving (Show, Eq)
 

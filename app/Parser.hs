@@ -7,6 +7,7 @@ import Data.Functor (($>))
 
 import AST
 import Lexer
+import Data.List (intercalate)
 
 parseModule :: Parser Module
 parseModule = do
@@ -137,4 +138,4 @@ parseQualifiedName :: Parser String
 parseQualifiedName = do
   x <- identifier
   xs <- many $ symbol "." *> identifier
-  return $ unwords $ x:xs
+  return $ intercalate "." (x:xs)
