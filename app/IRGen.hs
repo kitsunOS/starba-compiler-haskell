@@ -156,3 +156,17 @@ compileExpression (AST.StringLiteral str) = do
   regName <- getNextRegister
   addInstruction $ Set (Register regName) (SymbolReference symbolName)
   return regName
+
+compileExpression (AST.BinOp op left right) = do
+  leftReg <- compileExpression left
+  rightReg <- compileExpression right
+  regName <- getNextRegister
+  addInstruction $ IR.BinOp (irBinOp op) (Register regName) (Register leftReg) (Register rightReg)
+  return regName
+
+irBinOp :: String -> BinOpType
+irBinOp "+" = Add
+irBinOp "-" = Sub
+irBinOp "*" = Mul
+irBinOp "/" = Div
+irBinOp _ = error "Unknown binary operator"

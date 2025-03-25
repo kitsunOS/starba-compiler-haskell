@@ -20,6 +20,10 @@ blockToNasm (LabelledBlock (Label label) instrs) = intercalate "\n" $ labelLine 
 instrToNasm :: Instr -> String
 instrToNasm (Mov dest src) = "mov " ++ operandToNasm dest ++ ", " ++ operandToNasm src
 instrToNasm (Db lit) = "db " ++ literalToNasm lit
+instrToNasm (Add dest src) = "add " ++ operandToNasm dest ++ ", " ++ operandToNasm src
+instrToNasm (Sub dest src) = "sub " ++ operandToNasm dest ++ ", " ++ operandToNasm src
+instrToNasm (Mul src) = "mul " ++ operandToNasm src
+instrToNasm (Div divisor) = "div " ++ operandToNasm divisor
 
 operandToNasm :: Operand -> String
 operandToNasm (Register reg) = registerToNasm reg

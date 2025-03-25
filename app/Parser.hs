@@ -8,6 +8,7 @@ import Data.Functor (($>))
 import AST
 import Lexer
 import Data.List (intercalate)
+import Text.Parsec.Expr (buildExpressionParser, Assoc (AssocLeft), Operator(Infix))
 
 parseModule :: Parser Module
 parseModule = do
@@ -121,9 +122,19 @@ parseAssignment = do
   Assignment variableDefinition <$> parseExpression
 
 parseExpression :: Parser Expression
-parseExpression =
-    parseNumber
-    <|> parseString
+parseExpression = buildExpressionParser ops parseTerm where
+  ops = [
+      [binary "*" AssocLeft, binary "/" AssocLeft],
+      [binary "+" AssocLeft, binary "-" AssocLeft]
+    ]
+  binary name = Infix (reserved name >> return (BinOp name))
+  parseTerm = parens parseExpression <|> parseLiteral
+
+parseLiteral :: Parser Expression
+parseLiteral = choice
+  [ parseNumber
+  , parseString
+  ]
 
 parseNumber :: Parser Expression
 parseNumber = NumberLiteral <$> integer

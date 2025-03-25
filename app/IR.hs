@@ -32,6 +32,11 @@ newtype Symbol = Symbol String
 data Instruction
   = Ret Value
   | Set Value Value
+  | BinOp BinOpType Value Value Value
+  deriving (Show, Eq)
+
+data BinOpType
+  = Add | Sub | Mul | Div
   deriving (Show, Eq)
 
 data Literal

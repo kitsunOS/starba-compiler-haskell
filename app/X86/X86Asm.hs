@@ -14,6 +14,10 @@ newtype Label = Label String
 data Instr
   = Mov Operand Operand
   | Db Literal
+  | Add Operand Operand
+  | Sub Operand Operand
+  | Mul Operand
+  | Div Operand
   deriving (Show, Eq)
 
 data Operand

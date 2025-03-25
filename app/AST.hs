@@ -69,7 +69,8 @@ data Statement =
 
 data Expression =
   NumberLiteral Integer |
-  StringLiteral String
+  StringLiteral String |
+  BinOp String Expression Expression
   deriving (Show, Eq)
 
 data Type = Type {

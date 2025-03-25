@@ -29,3 +29,6 @@ stringLiteral = Token.stringLiteral lexer
 
 symbol :: String -> Parser String
 symbol = Token.symbol lexer
+
+parens :: Parser a -> Parser a
+parens = Token.parens lexer

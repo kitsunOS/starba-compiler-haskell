@@ -20,6 +20,19 @@ generateBlock (Block (IR.LabelRef labelName) instructions) = LabelledBlock (Asm.
 generateInstructions :: Instruction -> [Instr]
 generateInstructions (Ret value) = [Mov (Asm.Register EAX) (generateOperand value)]
 generateInstructions (Set dest src) = [Mov (generateOperand dest) (generateOperand src)]
+generateInstructions (BinOp IR.Add dest src1 src2) = [Asm.Add (generateOperand dest) (generateOperand src1)]
+generateInstructions (BinOp IR.Sub dest src1 src2) = [Asm.Sub (generateOperand dest) (generateOperand src1)]
+generateInstructions (BinOp IR.Mul dest src1 src2) = [
+  Mov (Asm.Register EAX) (generateOperand src1),
+  Asm.Mul (generateOperand src2),
+  Mov (generateOperand dest) (Asm.Register EAX)
+  ]
+generateInstructions (BinOp IR.Div dest src1 src2) = [
+  Mov (Asm.Register EDX) (Asm.Immediate 0),
+  Mov (Asm.Register EAX) (generateOperand src1),
+  Asm.Div (generateOperand src2),
+  Mov (generateOperand dest) (Asm.Register EAX)
+  ]
 
 generateSymbols :: SymbolTable -> [Section]
 generateSymbols (SymbolTable symbolMap _) = [Section "data" (map generateSymbol (Map.toList symbolMap))]
