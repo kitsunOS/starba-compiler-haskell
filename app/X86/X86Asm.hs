@@ -33,4 +33,4 @@ data Literal
   deriving (Show, Eq)
 
 data Register32 = EAX | EBX | ECX | EDX
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
