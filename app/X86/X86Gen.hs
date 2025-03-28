@@ -3,10 +3,10 @@ module X86.X86Gen where
 import qualified X86.X86Asm as Asm
 import IR
 import qualified Data.Map as Map
-import qualified X86.X86RegAlloc as X86RegAlloc
+import qualified RegAlloc
 
 newtype GenerationContext = GenerationContext {
-  gAllocation :: X86RegAlloc.Allocation
+  gAllocation :: RegAlloc.Allocation Asm.Register32
 }
 
 generateAsm :: GenerationContext -> IR.Module -> Either String Asm.X86Module
@@ -33,18 +33,18 @@ generateBlock ctx global (Block (IR.LabelRef labelName) instructions) = Asm.Labe
       Asm.Mov (Asm.Register Asm.EBP) (Asm.Register Asm.ESP),
       Asm.Push Asm.EBX]
 
-safeExit :: [Asm.Instr] -> [Asm.Instr]
-safeExit [] = [Asm.Ret]
-safeExit (instr : rest) = case instr of
-  Asm.Ret -> exitFooter ++ if null rest then [] else safeExit rest
-  _ -> instr : safeExit rest
-  where
-    exitFooter = [
-      Asm.Pop Asm.EBX,
-      Asm.Mov (Asm.Register Asm.ESP) (Asm.Register Asm.EBP),
-      Asm.Pop Asm.EBP,
-      Asm.Ret]
+safeExitFooter :: [Asm.Instr]
+safeExitFooter = [
+  Asm.Pop Asm.EBX,
+  Asm.Mov (Asm.Register Asm.ESP) (Asm.Register Asm.EBP),
+  Asm.Pop Asm.EBP,
+  Asm.Ret]
 
+safeExit :: [Asm.Instr] -> [Asm.Instr]
+safeExit [] = safeExitFooter
+safeExit (instr : rest) = case instr of
+  Asm.Ret -> safeExitFooter ++ if null rest then [] else safeExit rest
+  _ -> instr : safeExit rest
 generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
 generateInstructions ctx (Ret (Just value)) = [
   Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx value),
@@ -104,7 +104,7 @@ generateLiteral (IR.IntLiteral int) = Asm.IntLiteral int
 
 generateOperand :: GenerationContext -> IR.Value -> Asm.Operand
 -- TODO: This doesn't work properly with registers in dead code
-generateOperand ctx (IR.Register regName) = Asm.Register $ X86RegAlloc.allocatedRegisters (gAllocation ctx) Map.! regName
+generateOperand ctx (IR.Register regName) = Asm.Register $ RegAlloc.allocatedRegisters (gAllocation ctx) Map.! regName
 generateOperand _ (IR.Immediate imm) = Asm.Immediate imm
 generateOperand _ (IR.LabelReference (IR.LabelRef labelName)) = Asm.LabelRef (Asm.Label labelName)
 generateOperand _ (IR.SymbolReference symbolName) = Asm.LabelRef (Asm.Label symbolName)

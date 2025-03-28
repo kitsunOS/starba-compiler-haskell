@@ -3,6 +3,7 @@ module X86.X86Nasm (toNasmStr) where
 import X86.X86Asm
 import Numeric (showHex)
 import Data.List (intercalate)
+import qualified Register
 
 toNasmStr :: X86Module -> String
 toNasmStr (X86Module sections) = intercalate "\n\n" $ map sectionToNasm sections
@@ -37,14 +38,7 @@ operandToNasm (Memory mem) = concat ["[", "0x", showHex mem "", "]"]
 operandToNasm (LabelRef (Label label)) = label
 
 registerToNasm :: Register32 -> String
-registerToNasm EAX = "eax"
-registerToNasm EBX = "ebx"
-registerToNasm ECX = "ecx"
-registerToNasm EDX = "edx"
-registerToNasm ESP = "esp"
-registerToNasm EBP = "ebp"
-registerToNasm ESI = "esi"
-registerToNasm EDI = "edi"
+registerToNasm = Register.formatName
 
 literalToNasm :: Literal -> String
 literalToNasm (StringLiteral str) = show (length str) ++ ", \"" ++ str ++ "\""

@@ -1,4 +1,5 @@
 module X86.X86Asm where
+import qualified Register
 
 newtype X86Module = X86Module [Section]
 
@@ -41,3 +42,13 @@ data Literal
 
 data Register32 = EAX | EBX | ECX | EDX | ESP | EBP | ESI | EDI
   deriving (Show, Eq, Ord)
+
+instance Register.Register Register32 where
+  formatName EAX = "eax"
+  formatName EBX = "ebx"
+  formatName ECX = "ecx"
+  formatName EDX = "edx"
+  formatName ESP = "esp"
+  formatName EBP = "ebp"
+  formatName ESI = "esi"
+  formatName EDI = "edi"

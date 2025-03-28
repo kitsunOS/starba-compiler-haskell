@@ -1,9 +1,9 @@
-module X86.X86RegAlloc where
+module RegAlloc where
 import qualified IR
 import qualified IRReg
-import qualified X86.X86Asm as Asm
 import qualified Data.Map as Map
 import qualified Data.Set as Set
+import qualified Register
 import Data.Foldable (maximumBy)
 import Data.Ord (comparing)
 
@@ -15,15 +15,15 @@ data LiveSets = LiveSets {
 
 type InterferenceGraph = Map.Map IR.RegName (Set.Set IR.RegName)
 
-data Allocation = Allocation {
-  allocatedRegisters :: Map.Map IR.RegName Asm.Register32,
+data Allocation a = Allocation {
+  allocatedRegisters :: Map.Map IR.RegName a,
   spiltRegisters :: [IR.RegName]
 } deriving (Show, Eq)
 
 emptyLiveSets :: LiveSets
 emptyLiveSets = LiveSets [] Set.empty Set.empty
 
-allocateRegisters :: [IR.Block] -> Allocation
+allocateRegisters :: (Ord a, Register.Register a) => [IR.Block] -> Set.Set a -> Allocation a
 allocateRegisters blocks =
   let
     liveSets' = map (liveSets . IR.blockInstructions) blocks
@@ -64,19 +64,19 @@ interferences block liveSets = foldl collapseMap Map.empty (zip (IR.blockInstruc
       Map.insert use (Set.union live (Map.findWithDefault Set.empty use g)) g
       where g = foldl (\m reg -> Map.insert reg (Set.insert use (Map.findWithDefault Set.empty reg m)) m) map' live
 
-colors :: InterferenceGraph -> Allocation
-colors graph = colorWithSpills graph (Allocation Map.empty [])
+colors :: (Ord a, Register.Register a) => InterferenceGraph -> Set.Set a -> Allocation a
+colors graph allRegs = colorWithSpills graph allRegs (Allocation Map.empty [])
 
-colorWithSpills :: InterferenceGraph -> Allocation -> Allocation
-colorWithSpills graph alloc = case colorNext graph (Set.fromList [Asm.EAX, Asm.EBX, Asm.ECX, Asm.EDX]) alloc of
+colorWithSpills :: (Ord a, Register.Register a) => InterferenceGraph -> Set.Set a -> Allocation a -> Allocation a
+colorWithSpills graph allRegs alloc = case colorNext graph allRegs alloc of
   Left _ -> do
     let maxReg = maximumBy (comparing (weightRegName . (graph Map.!))) (Map.keys graph)
     let graph' = graphWithout maxReg graph
-    let alloc' = Allocation (Map.insert maxReg Asm.EAX (allocatedRegisters alloc)) (maxReg : spiltRegisters alloc)
-    colorWithSpills graph' alloc'
+    let alloc' = Allocation (allocatedRegisters alloc) (maxReg : spiltRegisters alloc)
+    colorWithSpills graph' allRegs alloc'
   Right alloc' -> alloc'
 
-colorNext :: InterferenceGraph -> Set.Set Asm.Register32 -> Allocation -> Either () Allocation
+colorNext :: (Ord a, Register.Register a) => InterferenceGraph -> Set.Set a -> Allocation a -> Either () (Allocation a)
 colorNext graph allRegs alloc
   | Map.null graph = Right alloc
   | otherwise = do

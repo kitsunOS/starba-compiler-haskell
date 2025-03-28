@@ -16,8 +16,10 @@ import IRGen (compileModule)
 import qualified X86.X86Gen as X86Gen
 import qualified X86.X86Nasm as X86Nasm
 import Data.Bifunctor (first)
-import qualified X86.X86RegAlloc as X86RegAlloc
+import qualified RegAlloc
 import qualified IR
+import qualified Data.Set as Set
+import qualified X86.X86Asm as X86Asm
 
 main :: IO ()
 main = do
@@ -45,15 +47,15 @@ run filename outname = do
   liftIO $ print ir
   liftIO $ print ""
 
-  let liveness = map (X86RegAlloc.liveSets . IR.blockInstructions) (irBlocks ir)
+  let liveness = map (RegAlloc.liveSets . IR.blockInstructions) (irBlocks ir)
   liftIO $ print liveness
   liftIO $ print ""
 
-  let interferences = X86RegAlloc.interferences (head $ irBlocks ir) (head liveness)
+  let interferences = RegAlloc.interferences (head $ irBlocks ir) (head liveness)
   liftIO $ print interferences
   liftIO $ print ""
 
-  let allocatedRegisters = X86RegAlloc.allocateRegisters (irBlocks ir)
+  let allocatedRegisters = RegAlloc.allocateRegisters (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX])
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 
