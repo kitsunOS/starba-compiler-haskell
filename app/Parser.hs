@@ -108,7 +108,8 @@ parseInnerVarDef = InnerVarDeclarationValue <$> parseVariableDefinition
 
 parseStatement :: Parser Statement
 parseStatement = choice
-  [ parseInnerDecl
+  [ try parseReturn
+  , try parseInnerDecl
   , parseAssignment
   ] <* symbol ";"
 
@@ -121,6 +122,11 @@ parseAssignment = do
   symbol "="
   Assignment variableDefinition <$> parseExpression
 
+parseReturn :: Parser Statement
+parseReturn = do
+  reserved "return"
+  Return <$> optionMaybe parseExpression
+
 parseExpression :: Parser Expression
 parseExpression = buildExpressionParser ops parseTerm where
   ops = [
@@ -128,7 +134,10 @@ parseExpression = buildExpressionParser ops parseTerm where
       [binary "+" AssocLeft, binary "-" AssocLeft]
     ]
   binary name = Infix (reserved name >> return (BinOp name))
-  parseTerm = parens parseExpression <|> parseLiteral
+  parseTerm = parens parseExpression <|> parseIdent <|> parseLiteral
+
+parseIdent :: Parser Expression
+parseIdent = Variable <$> identifier
 
 parseLiteral :: Parser Expression
 parseLiteral = choice

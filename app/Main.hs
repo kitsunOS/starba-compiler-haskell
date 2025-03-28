@@ -13,8 +13,8 @@ import Control.Monad.IO.Class (liftIO)
 import Parser
 import AST
 import IRGen (compileModule)
-import X86.X86Gen (generateAsm)
-import X86.X86Nasm (toNasmStr)
+import qualified X86.X86Gen as X86Gen
+import qualified X86.X86Nasm as X86Nasm
 import Data.Bifunctor (first)
 import qualified X86.X86RegAlloc as X86RegAlloc
 import qualified IR
@@ -57,9 +57,10 @@ run filename outname = do
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 
-  x86 <- ExceptT $ pure $ generateAsm ir
+  let generationContext = X86Gen.GenerationContext allocatedRegisters
+  x86 <- ExceptT $ pure $ X86Gen.generateAsm generationContext ir
 
-  let nasmStr = toNasmStr x86
+  let nasmStr = X86Nasm.toNasmStr x86
 
   liftIO $ putStrLn nasmStr
   liftIO $ print ""

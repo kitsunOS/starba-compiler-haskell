@@ -18,6 +18,7 @@ data Instr
   | Sub Operand Operand
   | Mul Operand
   | Div Operand
+  | Ret
   deriving (Show, Eq)
 
 data Operand

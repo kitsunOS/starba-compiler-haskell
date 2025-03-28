@@ -24,6 +24,7 @@ instrToNasm (Add dest src) = "add " ++ operandToNasm dest ++ ", " ++ operandToNa
 instrToNasm (Sub dest src) = "sub " ++ operandToNasm dest ++ ", " ++ operandToNasm src
 instrToNasm (Mul src) = "mul " ++ operandToNasm src
 instrToNasm (Div divisor) = "div " ++ operandToNasm divisor
+instrToNasm Ret = "ret"
 
 operandToNasm :: Operand -> String
 operandToNasm (Register reg) = registerToNasm reg

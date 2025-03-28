@@ -10,7 +10,7 @@ defs (IR.BinOp _ (IR.Register reg) _ _) = [reg]
 defs (IR.BinOp {}) = []
 
 uses :: IR.Instruction -> [IR.RegName]
-uses (IR.Ret (IR.Register reg)) = [reg]
+uses (IR.Ret (Just (IR.Register reg))) = [reg]
 uses (IR.Ret _) = []
 uses (IR.Set _ (IR.Register reg)) = [reg]
 uses (IR.Set _ _) = []

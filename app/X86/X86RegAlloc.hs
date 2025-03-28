@@ -65,11 +65,16 @@ interferences block liveSets = foldl collapseMap Map.empty (zip (IR.blockInstruc
       where g = foldl (\m reg -> Map.insert reg (Set.insert use (Map.findWithDefault Set.empty reg m)) m) map' live
 
 colors :: InterferenceGraph -> Allocation
-colors graph = case colorNext graph (Set.fromList [Asm.EAX, Asm.EBX, Asm.ECX, Asm.EDX]) (Allocation Map.empty []) of
-  Left _ -> error "Spills not implemented"
-  Right alloc -> alloc
+colors graph = colorWithSpills graph (Allocation Map.empty [])
 
--- TODO: Handle spills
+colorWithSpills :: InterferenceGraph -> Allocation -> Allocation
+colorWithSpills graph alloc = case colorNext graph (Set.fromList [Asm.EAX, Asm.EBX, Asm.ECX, Asm.EDX]) alloc of
+  Left _ -> do
+    let maxReg = maximumBy (comparing (weightRegName . (graph Map.!))) (Map.keys graph)
+    let graph' = graphWithout maxReg graph
+    let alloc' = Allocation (Map.insert maxReg Asm.EAX (allocatedRegisters alloc)) (maxReg : spiltRegisters alloc)
+    colorWithSpills graph' alloc'
+  Right alloc' -> alloc'
 
 colorNext :: InterferenceGraph -> Set.Set Asm.Register32 -> Allocation -> Either () Allocation
 colorNext graph allRegs alloc
@@ -85,7 +90,6 @@ colorNext graph allRegs alloc
       let alloc' = Allocation (Map.insert maxReg reg32 (allocatedRegisters alloc)) (spiltRegisters alloc)
       colorNext graph' allRegs alloc'
 
--- TODO: This will be used when calculating spills
 graphWithout :: IR.RegName -> InterferenceGraph -> InterferenceGraph
 graphWithout reg graph = Map.delete reg $ Map.map (Set.delete reg) graph
 

@@ -34,8 +34,7 @@ instance Show Value where
   show (LabelReference (LabelRef l)) = l
   show (SymbolReference s) = s
 
-data VarRef = VarRef String Integer
-  deriving (Show, Eq, Ord)
+type VarRef = String
 
 newtype LabelRef = LabelRef String
   deriving (Eq, Ord)
@@ -47,7 +46,7 @@ newtype Symbol = Symbol String
   deriving (Show, Eq)
 
 data Instruction
-  = Ret Value
+  = Ret (Maybe Value)
   | Set Value Value
   | BinOp BinOpType Value Value Value
   deriving (Eq)

@@ -1,52 +1,84 @@
 module X86.X86Gen where
 
-import X86.X86Asm as Asm
+import qualified X86.X86Asm as Asm
 import IR
 import qualified Data.Map as Map
+import qualified X86.X86RegAlloc as X86RegAlloc
 
-generateAsm :: IR.Module -> Either String X86Module
-generateAsm (Module procedures fieldTable symbolTable) = Right $ X86Module (generateProcedures procedures ++ generateSymbols symbolTable)
+newtype GenerationContext = GenerationContext {
+  gAllocation :: X86RegAlloc.Allocation
+}
 
-generateProcedures :: [Procedure] -> [Section]
-generateProcedures = map generateProcedure
+generateAsm :: GenerationContext -> IR.Module -> Either String Asm.X86Module
+generateAsm ctx (Module procedures fieldTable symbolTable) = Right $ Asm.X86Module (generateProcedures ctx procedures ++ generateSymbols symbolTable)
+
+generateProcedures :: GenerationContext -> [Procedure] -> [Asm.Section]
+generateProcedures ctx = map (generateProcedure ctx)
 
 -- TODO: We'll need to be able to merge sections with the same name
-generateProcedure :: Procedure -> Section
-generateProcedure (Procedure blocks) = Section "text" (map generateBlock blocks)
+generateProcedure :: GenerationContext -> Procedure -> Asm.Section
+generateProcedure ctx (Procedure blocks) = Asm.Section "text" (map (generateBlock ctx) blocks)
 
-generateBlock :: Block -> LabelledBlock
-generateBlock (Block (IR.LabelRef labelName) instructions) = LabelledBlock (Asm.Label labelName) (concatMap generateInstructions instructions)
+generateBlock :: GenerationContext -> Block -> Asm.LabelledBlock
+generateBlock ctx (Block (IR.LabelRef labelName) instructions) = Asm.LabelledBlock (Asm.Label labelName) (concatMap (generateInstructions ctx) instructions)
 
-generateInstructions :: Instruction -> [Instr]
-generateInstructions (Ret value) = [Mov (Asm.Register EAX) (generateOperand value)]
-generateInstructions (Set dest src) = [Mov (generateOperand dest) (generateOperand src)]
-generateInstructions (BinOp IR.Add dest src1 src2) = [Asm.Add (generateOperand dest) (generateOperand src1)]
-generateInstructions (BinOp IR.Sub dest src1 src2) = [Asm.Sub (generateOperand dest) (generateOperand src1)]
-generateInstructions (BinOp IR.Mul dest src1 src2) = [
-  Mov (Asm.Register EAX) (generateOperand src1),
-  Asm.Mul (generateOperand src2),
-  Mov (generateOperand dest) (Asm.Register EAX)
+generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
+generateInstructions ctx (Ret (Just value)) = [
+  Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx value),
+  Asm.Ret
   ]
-generateInstructions (BinOp IR.Div dest src1 src2) = [
-  Mov (Asm.Register EDX) (Asm.Immediate 0),
-  Mov (Asm.Register EAX) (generateOperand src1),
-  Asm.Div (generateOperand src2),
-  Mov (generateOperand dest) (Asm.Register EAX)
+generateInstructions ctx (Ret Nothing) = [Asm.Ret]
+generateInstructions ctx (Set dest src) = [Asm.Mov (generateOperand ctx dest) (generateOperand ctx src)]
+generateInstructions ctx (BinOp IR.Add dest src1 src2)
+  | rDest == rSrc1 = [
+    Asm.Add (generateOperand ctx dest) (generateOperand ctx src2)]
+  | rDest == rSrc2 = [
+    Asm.Add (generateOperand ctx dest) (generateOperand ctx src1)]
+  | otherwise = [
+    Asm.Mov (generateOperand ctx dest) (generateOperand ctx src2),
+    Asm.Add (generateOperand ctx dest) (generateOperand ctx src1)]
+  where
+    rDest = generateOperand ctx dest
+    rSrc1 = generateOperand ctx src1
+    rSrc2 = generateOperand ctx src2
+generateInstructions ctx (BinOp IR.Sub dest src1 src2)
+  | rDest == rSrc1 = [
+    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src2)]
+  | rDest == rSrc2 = [
+    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src1)]
+  | otherwise = [
+    Asm.Mov (generateOperand ctx dest) (generateOperand ctx src2),
+    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src1)]
+  where
+    rDest = generateOperand ctx dest
+    rSrc1 = generateOperand ctx src1
+    rSrc2 = generateOperand ctx src2
+generateInstructions ctx (BinOp IR.Mul dest src1 src2) = [
+  Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
+  Asm.Mul (generateOperand ctx src2),
+  Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
+  ]
+generateInstructions ctx (BinOp IR.Div dest src1 src2) = [
+  Asm.Mov (Asm.Register Asm.EDX) (Asm.Immediate 0),
+  Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
+  Asm.Div (generateOperand ctx src2),
+  Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
   ]
 
-generateSymbols :: SymbolTable -> [Section]
-generateSymbols (SymbolTable symbolMap _) = [Section "data" (map generateSymbol (Map.toList symbolMap))]
+generateSymbols :: SymbolTable -> [Asm.Section]
+generateSymbols (SymbolTable symbolMap _) = [Asm.Section "data" (map generateSymbol (Map.toList symbolMap))]
 
-generateSymbol :: (String, IR.Literal) -> LabelledBlock
-generateSymbol (name, lit) = LabelledBlock (Asm.Label name) [Db (generateLiteral lit)]
+generateSymbol :: (String, IR.Literal) -> Asm.LabelledBlock
+generateSymbol (name, lit) = Asm.LabelledBlock (Asm.Label name) [Asm.Db (generateLiteral lit)]
 
 generateLiteral :: IR.Literal -> Asm.Literal
 generateLiteral (IR.StringLiteral str) = Asm.StringLiteral str
 generateLiteral (IR.IntLiteral int) = Asm.IntLiteral int
 
-generateOperand :: IR.Value -> Operand
-generateOperand (IR.Register _) = Asm.Register EAX -- TODO: Register allocation
-generateOperand (IR.Immediate imm) = Asm.Immediate imm
-generateOperand (IR.LabelReference (IR.LabelRef labelName)) = Asm.LabelRef (Asm.Label labelName)
-generateOperand (IR.SymbolReference symbolName) = Asm.LabelRef (Asm.Label symbolName)
+generateOperand :: GenerationContext -> IR.Value -> Asm.Operand
+-- TODO: This doesn't work properly with registers in dead code
+generateOperand ctx (IR.Register regName) = Asm.Register $ X86RegAlloc.allocatedRegisters (gAllocation ctx) Map.! regName
+generateOperand _ (IR.Immediate imm) = Asm.Immediate imm
+generateOperand _ (IR.LabelReference (IR.LabelRef labelName)) = Asm.LabelRef (Asm.Label labelName)
+generateOperand _ (IR.SymbolReference symbolName) = Asm.LabelRef (Asm.Label symbolName)
 -- TODO: Labels and symbols should probably differ?

@@ -64,12 +64,14 @@ data EnumMemberAssign = EnumMember {
 
 data Statement =
   InnerDecl InnerDeclaration |
-  Assignment VariableDefinition Expression
+  Assignment VariableDefinition Expression |
+  Return (Maybe Expression)
   deriving (Show, Eq)
 
 data Expression =
   NumberLiteral Integer |
   StringLiteral String |
+  Variable String |
   BinOp String Expression Expression
   deriving (Show, Eq)
 

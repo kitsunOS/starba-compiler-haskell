@@ -128,6 +128,7 @@ compileFuncBody (AST.FunctionBody stmts) = mapM_ compileStatement stmts
 
 compileStatement :: AST.Statement -> IRGenM ()
 compileStatement (AST.InnerDecl innerDecl) = compileInnerDeclaration innerDecl
+compileStatement (AST.Return expr) = compileReturn expr
 
 compileInnerDeclaration :: AST.InnerDeclaration -> IRGenM ()
 compileInnerDeclaration (AST.InnerDeclaration name (AST.InnerVarDeclarationValue varDef)) = compileInnerVarDeclaration name varDef
@@ -136,33 +137,42 @@ compileInnerVarDeclaration :: String -> AST.VariableDefinition -> IRGenM ()
 compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
   regName <- compileExpression initializer
-  let varRef = VarRef name 0
   originalActiveRegisters <- gets irgActiveRegisters
   activeLabel <- gets irgActiveLabel
-  let newActiveRegisters = Map.alter updateInnerMap varRef originalActiveRegisters
+  let newActiveRegisters = Map.alter updateInnerMap name originalActiveRegisters
         where
           updateInnerMap Nothing = Just $ Map.singleton activeLabel regName
           updateInnerMap (Just labelMap) = Just $ Map.insert activeLabel regName labelMap
   modify $ \s -> s { irgActiveRegisters = newActiveRegisters }
+
+compileReturn :: Maybe AST.Expression -> IRGenM ()
+compileReturn Nothing = addInstruction $ Ret Nothing
+compileReturn (Just expr) = do
+  regName <- compileExpression expr
+  addInstruction $ Ret (Just (Register regName))
 
 compileExpression :: AST.Expression -> IRGenM RegName
 compileExpression (NumberLiteral num) = do
   regName <- getNextRegister
   addInstruction $ Set (Register regName) (Immediate num)
   return regName
-
 compileExpression (AST.StringLiteral str) = do
   symbolName <- allocateSymbol str
   regName <- getNextRegister
   addInstruction $ Set (Register regName) (SymbolReference symbolName)
   return regName
-
 compileExpression (AST.BinOp op left right) = do
   leftReg <- compileExpression left
   rightReg <- compileExpression right
   regName <- getNextRegister
   addInstruction $ IR.BinOp (irBinOp op) (Register regName) (Register leftReg) (Register rightReg)
   return regName
+compileExpression (Variable var) = do
+  activeRegisters <- gets irgActiveRegisters
+  activeLabel <- gets irgActiveLabel
+  case Map.lookup var activeRegisters >>= Map.lookup activeLabel of
+    Just regName -> return regName
+    Nothing -> throwError $ "Variable " ++ var ++ " not in scope"
 
 irBinOp :: String -> BinOpType
 irBinOp "+" = Add
