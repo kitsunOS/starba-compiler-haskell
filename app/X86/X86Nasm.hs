@@ -13,9 +13,11 @@ sectionToNasm (Section name blocks) = intercalate "\n" $ nameLine : map blockToN
     nameLine = "section ." ++ name
 
 blockToNasm :: LabelledBlock -> String
-blockToNasm (LabelledBlock (Label label) instrs) = intercalate "\n" $ labelLine : map instrToNasm instrs
+blockToNasm (LabelledBlock (Label label) instrs global) =
+  intercalate "\n" $ globalLine : labelLine : map instrToNasm instrs
   where
     labelLine = label ++ ":"
+    globalLine = if global then "global " ++ label else ""
 
 instrToNasm :: Instr -> String
 instrToNasm (Mov dest src) = "mov " ++ operandToNasm dest ++ ", " ++ operandToNasm src
@@ -24,6 +26,8 @@ instrToNasm (Add dest src) = "add " ++ operandToNasm dest ++ ", " ++ operandToNa
 instrToNasm (Sub dest src) = "sub " ++ operandToNasm dest ++ ", " ++ operandToNasm src
 instrToNasm (Mul src) = "mul " ++ operandToNasm src
 instrToNasm (Div divisor) = "div " ++ operandToNasm divisor
+instrToNasm (Push reg) = "push " ++ registerToNasm reg
+instrToNasm (Pop reg) = "pop " ++ registerToNasm reg
 instrToNasm Ret = "ret"
 
 operandToNasm :: Operand -> String
@@ -37,6 +41,10 @@ registerToNasm EAX = "eax"
 registerToNasm EBX = "ebx"
 registerToNasm ECX = "ecx"
 registerToNasm EDX = "edx"
+registerToNasm ESP = "esp"
+registerToNasm EBP = "ebp"
+registerToNasm ESI = "esi"
+registerToNasm EDI = "edi"
 
 literalToNasm :: Literal -> String
 literalToNasm (StringLiteral str) = show (length str) ++ ", \"" ++ str ++ "\""

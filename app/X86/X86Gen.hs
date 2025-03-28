@@ -17,10 +17,33 @@ generateProcedures ctx = map (generateProcedure ctx)
 
 -- TODO: We'll need to be able to merge sections with the same name
 generateProcedure :: GenerationContext -> Procedure -> Asm.Section
-generateProcedure ctx (Procedure blocks) = Asm.Section "text" (map (generateBlock ctx) blocks)
+generateProcedure ctx (Procedure blocks) = Asm.Section "text"
+  (generateBlock ctx True (head blocks) : map (generateBlock ctx False) (tail blocks))
 
-generateBlock :: GenerationContext -> Block -> Asm.LabelledBlock
-generateBlock ctx (Block (IR.LabelRef labelName) instructions) = Asm.LabelledBlock (Asm.Label labelName) (concatMap (generateInstructions ctx) instructions)
+generateBlock :: GenerationContext -> Bool -> Block -> Asm.LabelledBlock
+generateBlock ctx global (Block (IR.LabelRef labelName) instructions) = Asm.LabelledBlock {
+  Asm.blockLabel = Asm.Label labelName,
+  Asm.blockInsts = if global then entryHeader ++ instructions' else instructions',
+  Asm.blockGlobal = global
+}
+  where
+    instructions' = safeExit $ concatMap (generateInstructions ctx) instructions
+    entryHeader = [
+      Asm.Push Asm.EBP,
+      Asm.Mov (Asm.Register Asm.EBP) (Asm.Register Asm.ESP),
+      Asm.Push Asm.EBX]
+
+safeExit :: [Asm.Instr] -> [Asm.Instr]
+safeExit [] = [Asm.Ret]
+safeExit (instr : rest) = case instr of
+  Asm.Ret -> exitFooter ++ if null rest then [] else safeExit rest
+  _ -> instr : safeExit rest
+  where
+    exitFooter = [
+      Asm.Pop Asm.EBX,
+      Asm.Mov (Asm.Register Asm.ESP) (Asm.Register Asm.EBP),
+      Asm.Pop Asm.EBP,
+      Asm.Ret]
 
 generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
 generateInstructions ctx (Ret (Just value)) = [
@@ -69,7 +92,11 @@ generateSymbols :: SymbolTable -> [Asm.Section]
 generateSymbols (SymbolTable symbolMap _) = [Asm.Section "data" (map generateSymbol (Map.toList symbolMap))]
 
 generateSymbol :: (String, IR.Literal) -> Asm.LabelledBlock
-generateSymbol (name, lit) = Asm.LabelledBlock (Asm.Label name) [Asm.Db (generateLiteral lit)]
+generateSymbol (name, lit) = Asm.LabelledBlock {
+  Asm.blockLabel = Asm.Label name,
+  Asm.blockInsts = [Asm.Db (generateLiteral lit)],
+  Asm.blockGlobal = False
+}
 
 generateLiteral :: IR.Literal -> Asm.Literal
 generateLiteral (IR.StringLiteral str) = Asm.StringLiteral str

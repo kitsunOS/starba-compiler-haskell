@@ -5,7 +5,11 @@ newtype X86Module = X86Module [Section]
 data Section = Section String [LabelledBlock]
   deriving (Show, Eq)
 
-data LabelledBlock = LabelledBlock Label [Instr]
+data LabelledBlock = LabelledBlock {
+  blockLabel :: Label,
+  blockInsts :: [Instr],
+  blockGlobal :: Bool
+}
   deriving (Show, Eq)
 
 newtype Label = Label String
@@ -18,6 +22,8 @@ data Instr
   | Sub Operand Operand
   | Mul Operand
   | Div Operand
+  | Push Register32
+  | Pop Register32
   | Ret
   deriving (Show, Eq)
 
@@ -33,5 +39,5 @@ data Literal
   | IntLiteral Int
   deriving (Show, Eq)
 
-data Register32 = EAX | EBX | ECX | EDX
+data Register32 = EAX | EBX | ECX | EDX | ESP | EBP | ESI | EDI
   deriving (Show, Eq, Ord)
