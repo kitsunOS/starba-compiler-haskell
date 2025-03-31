@@ -83,3 +83,8 @@ data SymbolTable = SymbolTable {
 newtype FieldTable = FieldTable {
   fieldMap :: Map String Literal
 } deriving (Show, Eq)
+
+data RegEntry a
+  = Virtual RegName
+  | Physical a
+  deriving (Show, Eq, Ord)

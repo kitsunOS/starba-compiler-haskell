@@ -20,6 +20,7 @@ import qualified RegAlloc
 import qualified IR
 import qualified Data.Set as Set
 import qualified X86.X86Asm as X86Asm
+import qualified X86.X86Reg as X86Reg
 
 main :: IO ()
 main = do
@@ -47,7 +48,9 @@ run filename outname = do
   liftIO $ print ir
   liftIO $ print ""
 
-  let liveness = map (RegAlloc.liveSets . IR.blockInstructions) (irBlocks ir)
+  let ctx = RegAlloc.RegAllocContext X86Reg.intLive
+  let liveness :: [RegAlloc.LiveSets X86Asm.Register32]
+      liveness = map (RegAlloc.liveSets ctx . IR.blockInstructions) (irBlocks ir)
   liftIO $ print liveness
   liftIO $ print ""
 
@@ -55,7 +58,7 @@ run filename outname = do
   liftIO $ print interferences
   liftIO $ print ""
 
-  let allocatedRegisters = RegAlloc.allocateRegisters (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX])
+  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX])
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 
