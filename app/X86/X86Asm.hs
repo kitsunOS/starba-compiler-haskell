@@ -23,8 +23,13 @@ data Instr
   | Sub Operand Operand
   | Mul Operand
   | Div Operand
+  | Cmp Operand Operand
   | Push Register32
   | Pop Register32
+  | Jmp Label
+  | Je Label
+  | Sete Register8
+  | Movzx Register32 Register8
   | Ret
   deriving (Show, Eq)
 
@@ -40,6 +45,19 @@ data Literal
   | IntLiteral Int
   deriving (Show, Eq)
 
+data Register8 = AL | CL | DL | BL | AH | CH | DH | BH
+  deriving (Show, Eq, Ord)
+
+instance Register.Register Register8 where
+  formatName AL = "al"
+  formatName CL = "cl"
+  formatName DL = "dl"
+  formatName BL = "bl"
+  formatName AH = "ah"
+  formatName CH = "ch"
+  formatName DH = "dh"
+  formatName BH = "bh"
+
 data Register32 = EAX | EBX | ECX | EDX | ESP | EBP | ESI | EDI
   deriving (Show, Eq, Ord)
 
@@ -52,3 +70,20 @@ instance Register.Register Register32 where
   formatName EBP = "ebp"
   formatName ESI = "esi"
   formatName EDI = "edi"
+
+reg8To32 :: Register8 -> Register32
+reg8To32 AL = EAX
+reg8To32 CL = ECX
+reg8To32 DL = EDX
+reg8To32 BL = EBX
+reg8To32 AH = EAX
+reg8To32 CH = ECX
+reg8To32 DH = EDX
+reg8To32 BH = EBX
+
+reg32To8 :: Register32 -> Register8
+reg32To8 EAX = AL
+reg32To8 EBX = BL
+reg32To8 ECX = CL
+reg32To8 EDX = DL
+reg32To8 _ = error "Invalid 32-bit register for 8-bit conversion"

@@ -21,6 +21,8 @@ import qualified IR
 import qualified Data.Set as Set
 import qualified X86.X86Asm as X86Asm
 import qualified X86.X86Reg as X86Reg
+import qualified IRPhiElim
+import qualified Data.Map as Map
 
 main :: IO ()
 main = do
@@ -43,18 +45,26 @@ run filename outname = do
   liftIO $ print ast
   liftIO $ print ""
 
-  ir <- ExceptT $ pure $ compileModule ast
+  ir1 <- ExceptT $ pure $ compileModule ast
+  liftIO $ print ir1
+  liftIO $ print ""
 
+  let ir = IRPhiElim.rewriteModule ir1
   liftIO $ print ir
   liftIO $ print ""
 
   let ctx = RegAlloc.RegAllocContext X86Reg.intLive
+
+  let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
+      allInOut = RegAlloc.blocksLiveInOut2 (irBlocks ir)
+  liftIO $ putStrLn (showAll allInOut)
+
   let liveness :: [RegAlloc.LiveSets X86Asm.Register32]
-      liveness = map (RegAlloc.liveSets ctx . IR.blockInstructions) (irBlocks ir)
+      liveness = map (RegAlloc.liveSets ctx allInOut) (irBlocks ir)
   liftIO $ print liveness
   liftIO $ print ""
 
-  let interferences = RegAlloc.interferences (head $ irBlocks ir) (head liveness)
+  let interferences = RegAlloc.interferences ctx (head $ irBlocks ir) (head liveness)
   liftIO $ print interferences
   liftIO $ print ""
 
@@ -74,3 +84,6 @@ run filename outname = do
 irBlocks :: IR.Module -> [IR.Block]
 irBlocks (IR.Module (IR.Procedure blocks : _) _ _) = blocks
 irBlocks _ = error "No blocks in module"
+
+showAll :: (Show a) => Map.Map IR.LabelRef a -> String
+showAll m = unlines $ map (\(k, v) -> show k ++ ": " ++ show v) (Map.toList m)

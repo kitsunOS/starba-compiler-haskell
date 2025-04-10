@@ -4,6 +4,7 @@ import qualified X86.X86Asm as Asm
 import IR
 import qualified Data.Map as Map
 import qualified RegAlloc
+import qualified Debug.Trace as Debug
 
 newtype GenerationContext = GenerationContext {
   gAllocation :: RegAlloc.Allocation Asm.Register32
@@ -44,6 +45,7 @@ safeExit :: [Asm.Instr] -> [Asm.Instr]
 safeExit [] = safeExitFooter
 safeExit (instr : rest) = case instr of
   Asm.Ret -> safeExitFooter ++ if null rest then [] else safeExit rest
+  Asm.Jmp _ -> [ instr ]
   _ -> instr : safeExit rest
 generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
 generateInstructions ctx (Ret (Just value)) = [
@@ -77,6 +79,7 @@ generateInstructions ctx (BinOp IR.Sub dest src1 src2)
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
 generateInstructions ctx (BinOp IR.Mul dest src1 src2) = [
+  -- TODO: Does EDX need to be 0?
   Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
   Asm.Mul (generateOperand ctx src2),
   Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
@@ -86,6 +89,22 @@ generateInstructions ctx (BinOp IR.Div dest src1 src2) = [
   Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
   Asm.Div (generateOperand ctx src2),
   Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
+  ]
+generateInstructions ctx (BinOp IR.Eq dest src1 src2) = 
+  let 
+    rDest = requireReg32 (generateOperand ctx dest)
+    rSrc1 = generateOperand ctx src1
+    rSrc2 = generateOperand ctx src2
+  in [
+    Asm.Cmp rSrc1 rSrc2,
+    Asm.Sete (Asm.reg32To8 rDest),
+    Asm.Movzx rDest (Asm.reg32To8 rDest)
+    ]
+generateInstructions ctx (Jmp (LabelRef label)) = [Asm.Jmp (Asm.Label label)]
+generateInstructions ctx (JmpIf cond (LabelRef trueLabel) (LabelRef falseLabel)) = [
+  Asm.Cmp (generateOperand ctx cond) (Asm.Immediate 0),
+  Asm.Je (Asm.Label falseLabel),
+  Asm.Jmp (Asm.Label trueLabel)
   ]
 
 generateSymbols :: SymbolTable -> [Asm.Section]
@@ -109,3 +128,7 @@ generateOperand _ (IR.Immediate imm) = Asm.Immediate imm
 generateOperand _ (IR.LabelReference (IR.LabelRef labelName)) = Asm.LabelRef (Asm.Label labelName)
 generateOperand _ (IR.SymbolReference symbolName) = Asm.LabelRef (Asm.Label symbolName)
 -- TODO: Labels and symbols should probably differ?
+
+requireReg32 :: Asm.Operand -> Asm.Register32
+requireReg32 (Asm.Register reg) = reg
+requireReg32 _ = error "Expected a 32-bit register"

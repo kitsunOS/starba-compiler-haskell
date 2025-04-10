@@ -63,16 +63,18 @@ data EnumMemberAssign = EnumMember {
 } deriving (Show, Eq)
 
 data Statement =
-  InnerDecl InnerDeclaration |
-  Assignment VariableDefinition Expression |
-  Return (Maybe Expression)
+  InnerDecl InnerDeclaration
+  | Assignment VariableDefinition Expression
+  | Return (Maybe Expression)
+  | If Expression Statement (Maybe Statement)
   deriving (Show, Eq)
 
 data Expression =
-  NumberLiteral Integer |
-  StringLiteral String |
-  Variable String |
-  BinOp String Expression Expression
+  NumberLiteral Integer
+  | StringLiteral String
+  | Variable String
+  | BinOp String Expression Expression
+  | Ternary Expression Expression Expression
   deriving (Show, Eq)
 
 data Type = Type {

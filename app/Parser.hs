@@ -108,10 +108,11 @@ parseInnerVarDef = InnerVarDeclarationValue <$> parseVariableDefinition
 
 parseStatement :: Parser Statement
 parseStatement = choice
-  [ try parseReturn
-  , try parseInnerDecl
-  , parseAssignment
-  ] <* symbol ";"
+  [ try parseReturn <* symbol ";"
+  , try parseControl
+  , try parseInnerDecl <* symbol ";"
+  , parseAssignment <* symbol ";"
+  ]
 
 parseInnerDecl :: Parser Statement
 parseInnerDecl = InnerDecl <$> parseInnerDeclaration
@@ -127,9 +128,40 @@ parseReturn = do
   reserved "return"
   Return <$> optionMaybe parseExpression
 
+parseControl :: Parser Statement
+parseControl = choice
+  [ parseIf ]
+
+parseIf :: Parser Statement
+parseIf = do
+  reserved "if"
+  symbol "("
+  condition <- parseExpression
+  symbol ")"
+  thenBlock <- parseStatement
+  elseBlock <- optionMaybe $ do
+    reserved "else"
+    parseStatement
+  return $ If condition thenBlock elseBlock
+
 parseExpression :: Parser Expression
-parseExpression = buildExpressionParser ops parseTerm where
+parseExpression = choice
+  [ try parseTernary
+  , parseBinary
+  ]
+
+parseTernary :: Parser Expression
+parseTernary = do
+  condition <- parseBinary
+  symbol "?"
+  trueBranch <- parseExpression
+  symbol ":"
+  Ternary condition trueBranch <$> parseExpression
+
+parseBinary :: Parser Expression
+parseBinary = buildExpressionParser ops parseTerm where
   ops = [
+      [binary "==" AssocLeft, binary "!=" AssocLeft],
       [binary "*" AssocLeft, binary "/" AssocLeft],
       [binary "+" AssocLeft, binary "-" AssocLeft]
     ]

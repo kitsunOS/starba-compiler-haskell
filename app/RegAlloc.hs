@@ -1,17 +1,27 @@
 module RegAlloc where
 import qualified IR
-import qualified IRReg
+import qualified IRInstrAnalysis as IRIA
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Register
 import Data.Foldable (maximumBy, Foldable (fold))
 import Data.Ord (comparing)
 import qualified X86.X86Reg as X86Reg
+import qualified Debug.Trace as Debug
 
-data LiveSets a = LiveSets {
-  liveInstrs :: [Set.Set (IR.RegEntry a)],
-  liveOuts :: Set.Set (IR.RegEntry a),
-  liveIns :: Set.Set (IR.RegEntry a)
+data BlockUseDefs a = BlockUseDefs {
+  uses :: Set.Set (IR.RegEntry a),
+  defs :: Set.Set (IR.RegEntry a),
+  successors :: Set.Set IR.LabelRef
+} deriving (Show, Eq)
+
+data BlockInOut a = BlockInOut {
+  liveIn :: Set.Set (IR.RegEntry a),
+  liveOut :: Set.Set (IR.RegEntry a)
+} deriving (Show, Eq)
+
+newtype LiveSets a = LiveSets {
+  liveInstrs :: [Set.Set (IR.RegEntry a)]
 } deriving (Show, Eq)
 
 data Allocation a = Allocation {
@@ -26,42 +36,82 @@ newtype RegAllocContext a = RegAllocContext {
 type InterferenceGraph a = Map.Map IR.RegName (Set.Set (IR.RegEntry a))
 
 emptyLiveSets :: LiveSets a
-emptyLiveSets = LiveSets [] Set.empty Set.empty
+emptyLiveSets = LiveSets []
+
+emptyUseDefs :: BlockUseDefs a
+emptyUseDefs = BlockUseDefs Set.empty Set.empty Set.empty
+
+emptyInOut :: BlockInOut a
+emptyInOut = BlockInOut Set.empty Set.empty
 
 allocateRegisters :: (Ord a, Register.Register a) => RegAllocContext a -> [IR.Block] -> Set.Set a -> Allocation a
 allocateRegisters ctx blocks =
   let
-    liveSets' = map (liveSets ctx . IR.blockInstructions) blocks
-    interferences' = foldl (\m (b, l) -> Map.union m (interferences b l)) Map.empty (zip blocks liveSets')
+    inOuts = blocksLiveInOut2 blocks
+    liveSets' = map (liveSets ctx inOuts) blocks
+    interferences' = foldl (\m (b, l) -> Map.union m (interferences ctx b l)) Map.empty (zip blocks liveSets')
   in
     colors interferences'
 
-liveSets :: (Ord a, Register.Register a) => RegAllocContext a -> [IR.Instruction] -> LiveSets a
-liveSets ctx instructions = snd $ foldl (liveSet ctx) (Set.empty, emptyLiveSets) (reverse instructions)
+blocksLiveInOut2 :: (Ord a, Register.Register a) => [IR.Block] -> Map.Map IR.LabelRef (BlockInOut a)
+blocksLiveInOut2 = blocksLiveInOut . blocksUseDefs
+
+blocksUseDefs :: (Ord a, Register.Register a) => [IR.Block] -> Map.Map IR.LabelRef (BlockUseDefs a)
+blocksUseDefs blocks = Map.fromList $ map (\b -> (IR.blockLabel b, blockUseDefs b)) blocks
+  where
+    blockUseDefs :: (Ord a0, Register.Register a0) => IR.Block -> BlockUseDefs a0
+    blockUseDefs block = snd $ foldl useDef (Set.empty, emptyUseDefs) (reverse $ IR.blockInstructions block)
+    useDef :: (Ord a0, Register.Register a0) => (Set.Set (IR.RegEntry a0), BlockUseDefs a0) -> IR.Instruction -> (Set.Set (IR.RegEntry a0), BlockUseDefs a0)
+    useDef (live, useDefs) instr =
+      let
+        defs' = Set.fromList (map IR.Virtual (IRIA.defs instr))
+        uses' = Set.fromList (map IR.Virtual (IRIA.uses instr))
+        live' = (live Set.\\ defs') `Set.union` uses'
+        defs'' = Set.union defs' (defs useDefs)
+        successors' = Set.union (Set.fromList (IRIA.successors instr)) (successors useDefs)
+        useDefs' = BlockUseDefs live' defs'' successors'
+      in
+        (live', useDefs')
+
+blocksLiveInOut :: (Ord a, Register.Register a) => Map.Map IR.LabelRef (BlockUseDefs a) -> Map.Map IR.LabelRef (BlockInOut a)
+blocksLiveInOut blocks = iterateUntilStable (manyBlocksLiveInOut Map.empty blocks) blocks
+  where
+    iterateUntilStable :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> Map.Map IR.LabelRef (BlockUseDefs a0) -> Map.Map IR.LabelRef (BlockInOut a0)
+    iterateUntilStable blocks' useDefs =
+      let
+        blocks'' = manyBlocksLiveInOut blocks' useDefs
+        changed = Map.filterWithKey (\k v -> v /= blocks' Map.! k) blocks''
+      in
+        if Map.null changed then blocks' else iterateUntilStable blocks'' useDefs
+    manyBlocksLiveInOut :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> Map.Map IR.LabelRef (BlockUseDefs a0) -> Map.Map IR.LabelRef (BlockInOut a0)
+    manyBlocksLiveInOut init = Map.mapWithKey (\k v -> blockLiveInOut init v)
+    blockLiveInOut :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> BlockUseDefs a0 -> BlockInOut a0
+    blockLiveInOut init useDefs =
+      let
+        liveOut' = Set.unions (Set.map (\s -> liveIn (Map.findWithDefault emptyInOut s init)) (successors useDefs))
+        liveIn' = Set.union (Set.difference liveOut' (defs useDefs)) (uses useDefs)
+      in
+        BlockInOut liveIn' liveOut'
+
+liveSets :: (Ord a, Register.Register a) => RegAllocContext a -> Map.Map IR.LabelRef (BlockInOut a) -> IR.Block -> LiveSets a
+liveSets ctx blockInOuts (IR.Block name instructions) = snd $ foldl (liveSet ctx) (liveOut (blockInOuts Map.! name), emptyLiveSets) (reverse instructions)
   where
     liveSet :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> (Set.Set (IR.RegEntry a0), LiveSets a0) -> IR.Instruction -> (Set.Set (IR.RegEntry a0), LiveSets a0)
     liveSet ctx (live, liveSets') instr =
       let
-        defs' = Set.fromList (map IR.Virtual (IRReg.defs instr))
-        uses' = Set.fromList (map IR.Virtual (IRReg.uses instr))
+        defs' = Set.fromList (map IR.Virtual (IRIA.defs instr))
+        uses' = Set.fromList (map IR.Virtual (IRIA.uses instr))
         live' = (live Set.\\ defs') `Set.union` uses'
         localLive = live' `Set.union` Set.fromList (intLive ctx instr)
         instrs = (live' `Set.union` localLive) : liveInstrs liveSets'
-        liveOuts' = Set.union (liveOuts liveSets') defs'
-        liveIns' = Set.union (liveIns liveSets') uses' Set.\\ defs'
       in
-        (live', LiveSets {
-          liveInstrs = instrs,
-          liveOuts = liveOuts',
-          liveIns = liveIns'})
+        (live', LiveSets instrs)
 
--- TODO: Using liveIns and liveOuts, back-insert interfering registers regarding other blocks
-
-interferences :: (Ord a, Register.Register a) => IR.Block -> LiveSets a -> InterferenceGraph a
-interferences block liveSets = foldl collapseMap Map.empty (zip (IR.blockInstructions block) (liveInstrs liveSets))
+interferences :: (Ord a, Register.Register a) => RegAllocContext a -> IR.Block -> LiveSets a -> InterferenceGraph a
+interferences ctx block liveSets = foldl (collapseMap ctx) Map.empty (zip (IR.blockInstructions block) (liveInstrs liveSets))
   where
-    collapseMap :: (Ord a0, Register.Register a0) => InterferenceGraph a0 -> (IR.Instruction, Set.Set (IR.RegEntry a0)) -> InterferenceGraph a0
-    collapseMap map' (instr, live) = insertDefs map' (IRReg.uses instr) live
+    collapseMap :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> InterferenceGraph a0 -> (IR.Instruction, Set.Set (IR.RegEntry a0)) -> InterferenceGraph a0
+    collapseMap ctx map' (instr, live) = insertPhysDefs (insertDefs map' (IRIA.uses instr) live) (intLive ctx instr) live
     insertDefs :: (Ord a0, Register.Register a0) => InterferenceGraph a0 -> [IR.RegName] -> Set.Set (IR.RegEntry a0) -> InterferenceGraph a0
     insertDefs map' uses live = foldl (\m u -> insertDef (live Set.\\ Set.singleton (IR.Virtual u)) m u) map' uses
     insertDef :: (Ord a0, Register.Register a0) => Set.Set (IR.RegEntry a0) -> InterferenceGraph a0 -> IR.RegName -> InterferenceGraph a0
@@ -70,6 +120,15 @@ interferences block liveSets = foldl collapseMap Map.empty (zip (IR.blockInstruc
       where g = foldl (\m re -> case re of
               IR.Virtual regName -> Map.insert regName (Set.insert (IR.Virtual use) (Map.findWithDefault Set.empty regName m)) m
               IR.Physical _ -> m) map' live
+    insertPhysDefs :: (Ord a0, Register.Register a0) => InterferenceGraph a0 -> [IR.RegEntry a0] -> Set.Set (IR.RegEntry a0) -> InterferenceGraph a0
+    insertPhysDefs map' uses live = foldl (\m u -> case u of
+        IR.Physical reg -> insertPhysDef (live Set.\\ Set.singleton (IR.Physical reg)) m reg
+        _ -> m) map' uses
+    insertPhysDef :: (Ord a0, Register.Register a0) => Set.Set (IR.RegEntry a0) -> InterferenceGraph a0 -> a0 -> InterferenceGraph a0
+    insertPhysDef live map' use =
+      foldl (\m re -> case re of
+        IR.Virtual regName -> Map.insert regName (Set.insert (IR.Physical use) (Map.findWithDefault Set.empty regName m)) m
+        IR.Physical _ -> m) map' live
 
 colors :: (Ord a, Register.Register a) => InterferenceGraph a -> Set.Set a -> Allocation a
 colors graph allRegs = colorWithSpills graph allRegs (Allocation Map.empty [])

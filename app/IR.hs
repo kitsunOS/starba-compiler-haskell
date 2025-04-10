@@ -1,11 +1,19 @@
 module IR where
 import Data.Map (Map)
+import Data.List (intercalate)
 
 data Module = Module [Procedure] FieldTable SymbolTable
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show Module where
+  show (Module procedures fieldTable symbolTable) = intercalate "\n" (map show procedures) ++
+    "\n" ++ show fieldTable ++ "\n" ++ show symbolTable
 
 newtype Procedure = Procedure [Block]
-  deriving (Show, Eq)
+  deriving (Eq)
+
+instance Show Procedure where
+  show (Procedure blocks) = unlines $ map show blocks
 
 data Block = Block {
   blockLabel :: LabelRef,
@@ -13,7 +21,11 @@ data Block = Block {
 } deriving (Eq)
 
 instance Show Block where
-  show (Block label instructions) = show label ++ ":\n" ++ unlines (map (\i -> "  " ++ show i) instructions)
+  show (Block label instructions) = show label ++ ":" ++
+    if listEmpty instructions then "" else "\n" ++ intercalate "\n" (map (\i -> "  " ++ show i) instructions)
+    where
+      listEmpty [] = True
+      listEmpty _ = False
 
 data RegName = RegName String Int
   deriving (Eq, Ord)
@@ -49,15 +61,23 @@ data Instruction
   = Ret (Maybe Value)
   | Set Value Value
   | BinOp BinOpType Value Value Value
+  | Jmp LabelRef
+  | JmpIf Value LabelRef LabelRef
+  | Phi RegName [(LabelRef, RegName)]
   deriving (Eq)
 
 instance Show Instruction where
-  show (Ret v) = "ret " ++ show v
+  show (Ret v) = "ret " ++ maybe "" show v
   show (Set v1 v2) = "set " ++ show v1 ++ " " ++ show v2
   show (BinOp op v1 v2 v3) = show op ++ " " ++ show v1 ++ " " ++ show v2 ++ " " ++ show v3
+  show (Jmp l) = "jmp " ++ show l
+  show (JmpIf v l1 l2) = "jmpif " ++ show v ++ " " ++ show l1 ++ " " ++ show l2
+  show (Phi reg pairs) = "phi " ++ show reg ++ " " ++ showPairs pairs
+    where
+      showPairs = unwords . map (\(l, r) -> show l ++ " " ++ show r)
 
 data BinOpType
-  = Add | Sub | Mul | Div
+  = Add | Sub | Mul | Div | Eq
   deriving (Eq)
 
 instance Show BinOpType where
@@ -65,6 +85,7 @@ instance Show BinOpType where
   show Sub = "-"
   show Mul = "*"
   show Div = "/"
+  show Eq = "=="
 
 data Literal
   = IntLiteral Int

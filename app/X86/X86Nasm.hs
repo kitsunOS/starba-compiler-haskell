@@ -27,8 +27,13 @@ instrToNasm (Add dest src) = "add " ++ operandToNasm dest ++ ", " ++ operandToNa
 instrToNasm (Sub dest src) = "sub " ++ operandToNasm dest ++ ", " ++ operandToNasm src
 instrToNasm (Mul src) = "mul " ++ operandToNasm src
 instrToNasm (Div divisor) = "div " ++ operandToNasm divisor
+instrToNasm (Cmp dest src) = "cmp " ++ operandToNasm dest ++ ", " ++ operandToNasm src
 instrToNasm (Push reg) = "push " ++ registerToNasm reg
 instrToNasm (Pop reg) = "pop " ++ registerToNasm reg
+instrToNasm (Jmp (Label label)) = "jmp " ++ label
+instrToNasm (Je (Label label)) = "je " ++ label
+instrToNasm (Sete reg) = "sete " ++ registerToNasm8 reg
+instrToNasm (Movzx dest src) = "movzx " ++ registerToNasm dest ++ ", " ++ registerToNasm8 src
 instrToNasm Ret = "ret"
 
 operandToNasm :: Operand -> String
@@ -39,6 +44,9 @@ operandToNasm (LabelRef (Label label)) = label
 
 registerToNasm :: Register32 -> String
 registerToNasm = Register.formatName
+
+registerToNasm8 :: Register8 -> String
+registerToNasm8 = Register.formatName
 
 literalToNasm :: Literal -> String
 literalToNasm (StringLiteral str) = show (length str) ++ ", \"" ++ str ++ "\""

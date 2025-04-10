@@ -5,6 +5,7 @@ import IR
 import qualified Data.Map as Map
 import Control.Monad.State
 import Control.Monad.Except
+import qualified Data.Set as Set
 
 -- Data types
 data IRGenD = IRGen {
@@ -13,11 +14,20 @@ data IRGenD = IRGen {
   irgNextRegister :: RegName,
   irgNextSymbolName :: String,
   irgActiveRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
-  irgActiveLabel :: LabelRef
+  irgActiveLabel :: LabelRef,
+  irgAllLabels :: Set.Set LabelRef
 }
 type IRGenM = StateT IRGenD (Except String)
 defaultState :: IRGenD
-defaultState = IRGen [] (SymbolTable Map.empty Map.empty) (RegName "a" 0) "a" Map.empty (LabelRef "entry")
+defaultState = IRGen {
+  irgBlocks = [],
+  irgSymbolTable = SymbolTable Map.empty Map.empty,
+  irgNextRegister = RegName "a" 0,
+  irgNextSymbolName = "a",
+  irgActiveRegisters = Map.empty,
+  irgActiveLabel = LabelRef "entry",
+  irgAllLabels = Set.empty
+}
 
 data DeclarationContribution = DeclarationContribution {
   declProcedures :: [Procedure],
@@ -26,6 +36,21 @@ data DeclarationContribution = DeclarationContribution {
 }
 
 -- IRGen helpers
+nextLabel :: String -> IRGenM LabelRef
+nextLabel label = nextLabelPostfix label ""
+  where
+    nextLabelPostfix :: String -> String -> IRGenM LabelRef
+    nextLabelPostfix label postFix = do
+      let label' = label ++ case postFix of
+            "" -> ""
+            _  -> "_" ++ postFix
+      allLabels <- gets irgAllLabels
+      if Set.member (LabelRef label') allLabels then
+        nextLabelPostfix label (incrementName postFix)
+      else (do
+        modify $ \s -> s { irgAllLabels = Set.insert (LabelRef label') (irgAllLabels s) }
+        return $ LabelRef label')
+
 getNextRegister :: IRGenM RegName
 getNextRegister = do
   regName <- gets irgNextRegister
@@ -41,6 +66,16 @@ addInstructionToBlock instruction (Block label instructions : blocks) activeLabe
   | label == activeLabel = Block label (instruction : instructions) : blocks
   | otherwise = Block label instructions : addInstructionToBlock instruction blocks activeLabel
 
+startBlock :: LabelRef -> LabelRef -> IRGenM ()
+startBlock label inheritedLabel = do
+  modify $ \s -> s { irgBlocks = Block label [] : irgBlocks s, irgActiveLabel = label }
+  modify $ \s -> s { irgActiveRegisters = inheritVars label (irgActiveRegisters s) inheritedLabel }
+  return ()
+  where
+    inheritVars :: LabelRef -> Map.Map VarRef (Map.Map LabelRef RegName) -> LabelRef -> Map.Map VarRef (Map.Map LabelRef RegName)
+    inheritVars newLabel activeRegisters inheritedLabel =
+      Map.mapWithKey (\varName regMap -> Map.insert newLabel (regMap Map.! inheritedLabel) regMap) activeRegisters
+
 allocateSymbol :: String -> IRGenM String
 allocateSymbol value = do
   symbolName <- gets irgNextSymbolName
@@ -53,7 +88,7 @@ allocateSymbol value = do
       let symbolMap' = Map.insert symbolName lit (symbolMap symbolTable)
           reverseMap' = Map.insert lit symbolName (reverseMap symbolTable)
           symbolTable' = SymbolTable symbolMap' reverseMap'
-      modify $ \s -> s { irgSymbolTable = symbolTable', irgNextSymbolName = incrementRegName symbolName }
+      modify $ \s -> s { irgSymbolTable = symbolTable', irgNextSymbolName = incrementName symbolName }
       return symbolName
 
 -- Small helpers
@@ -73,10 +108,10 @@ mergeFieldTable (FieldTable fieldMap1) (FieldTable fieldMap2) =
 
 nextRegName :: RegName -> RegName
 nextRegName (RegName prefix num) =
-  RegName (incrementRegName prefix) 0
+  RegName (incrementName prefix) 0
 
-incrementRegName :: String -> String
-incrementRegName = reverse . increment . reverse
+incrementName :: String -> String
+incrementName = reverse . increment . reverse
   where
     increment [] = ['a']
     increment ('z':xs) = 'a' : increment xs
@@ -173,10 +208,29 @@ compileExpression (Variable var) = do
   case Map.lookup var activeRegisters >>= Map.lookup activeLabel of
     Just regName -> return regName
     Nothing -> throwError $ "Variable " ++ var ++ " not in scope"
+compileExpression (AST.Ternary cond trueExpr falseExpr) = do
+  condReg <- compileExpression cond
+  trueLabel <- nextLabel "ternary_true"
+  falseLabel <- nextLabel "ternary_false"
+  endLabel <- nextLabel "ternary_end"
+  currentLabel <- gets irgActiveLabel
+  addInstruction $ IR.JmpIf (Register condReg) trueLabel falseLabel
+  startBlock trueLabel currentLabel
+  trueReg <- compileExpression trueExpr
+  addInstruction $ IR.Jmp endLabel
+  startBlock falseLabel currentLabel
+  falseReg <- compileExpression falseExpr
+  addInstruction $ IR.Jmp endLabel
+  startBlock endLabel currentLabel
+  outReg <- getNextRegister
+  addInstruction $ IR.Phi outReg [(trueLabel, trueReg), (falseLabel, falseReg)]
+  return outReg
+
 
 irBinOp :: String -> BinOpType
 irBinOp "+" = Add
 irBinOp "-" = Sub
 irBinOp "*" = Mul
 irBinOp "/" = Div
+irBinOp "==" = Eq
 irBinOp _ = error "Unknown binary operator"
