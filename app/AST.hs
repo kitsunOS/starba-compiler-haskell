@@ -67,6 +67,8 @@ data Statement =
   | Assignment String Expression
   | Return (Maybe Expression)
   | If Expression Statement (Maybe Statement)
+  | While Expression Statement
+  | For (Maybe AST.InnerDeclaration) (Maybe Expression) (Maybe Expression) Statement
   | BlockBody [Statement]
   deriving (Show, Eq)
 

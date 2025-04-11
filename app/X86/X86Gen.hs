@@ -105,13 +105,21 @@ generateInstructions ctx (BinOp IR.Div dest src1 src2) = if not (validOperand ct
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp IR.Eq dest src1 src2) = if not (validOperand ctx dest) then [] else [
-  Asm.Cmp rSrc1 rSrc2,
-  Asm.Sete (Asm.reg32To8 rDest),
-  Asm.Movzx rDest (Asm.reg32To8 rDest)
-  ]
+generateInstructions ctx (BinOp op dest src1 src2) = if not (validOperand ctx dest) then [] else
+  [
+    Asm.Cmp rSrc1 rSrc2,
+    case op of
+      IR.Eq -> Asm.Sete rDest8
+      IR.Lt -> Asm.Setl rDest8
+      IR.Le -> Asm.Setle rDest8
+      IR.Gt -> Asm.Setg rDest8
+      IR.Ge -> Asm.Setge rDest8
+      IR.Ne -> Asm.Setne rDest8,
+    Asm.Movzx rDest (Asm.reg32To8 rDest)
+    ]
   where
     rDest = requireReg32 (generateOperand ctx dest)
+    rDest8 = Asm.reg32To8 rDest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
 generateInstructions ctx (Jmp (LabelRef label)) = [Asm.Jmp (Asm.Label label)]

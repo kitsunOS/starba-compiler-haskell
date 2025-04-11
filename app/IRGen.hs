@@ -6,11 +6,13 @@ import qualified Data.Map as Map
 import Control.Monad.State
 import Control.Monad.Except
 import qualified Data.Set as Set
+import qualified Data.Foldable
 
 -- Data types
 data ActiveScope = ActiveScope {
   activeScopeParent :: Maybe ActiveScope,
-  activeScopeRegisters :: Map.Map VarRef (Map.Map LabelRef RegName)
+  activeScopeRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
+  activeScopeSources :: Map.Map VarRef (Set.Set LabelRef)
 }
 
 data IRGenD = IRGen {
@@ -30,7 +32,7 @@ defaultState = IRGen {
   irgSymbolTable = SymbolTable Map.empty Map.empty,
   irgNextRegister = RegName "a" 0,
   irgNextSymbolName = "a",
-  irgActiveScope = ActiveScope Nothing Map.empty,
+  irgActiveScope = ActiveScope Nothing Map.empty Map.empty,
   irgActiveLabel = LabelRef "entry",
   irgAllLabels = Set.empty
 }
@@ -79,9 +81,9 @@ startBlock label inheritedLabel = do
   return ()
   where
     inheritScope :: LabelRef -> ActiveScope -> LabelRef -> ActiveScope
-    inheritScope newLabel (ActiveScope parent activeRegisters) inheritedLabel = case parent of
-      Just parentScope -> ActiveScope (Just (inheritScope newLabel parentScope inheritedLabel)) (inheritVars newLabel activeRegisters inheritedLabel)
-      Nothing -> ActiveScope Nothing (inheritVars newLabel activeRegisters inheritedLabel)
+    inheritScope newLabel (ActiveScope parent activeRegisters sources) inheritedLabel = case parent of
+      Just parentScope -> ActiveScope (Just (inheritScope newLabel parentScope inheritedLabel)) (inheritVars newLabel activeRegisters inheritedLabel) sources
+      Nothing -> ActiveScope Nothing (inheritVars newLabel activeRegisters inheritedLabel) sources
     inheritVars :: LabelRef -> Map.Map VarRef (Map.Map LabelRef RegName) -> LabelRef -> Map.Map VarRef (Map.Map LabelRef RegName)
     inheritVars newLabel activeRegisters inheritedLabel =
       Map.mapWithKey (\varName regMap -> Map.insert newLabel (regMap Map.! inheritedLabel) regMap) activeRegisters
@@ -106,61 +108,70 @@ createVar :: String -> RegName -> IRGenM ()
 createVar name regName = do
   activeScope <- gets irgActiveScope
   activeLabel <- gets irgActiveLabel
+  let sources = Map.insert name (Set.singleton activeLabel) (activeScopeSources activeScope)
   case Map.lookup name (activeScopeRegisters activeScope) of
     Just regMap -> case Map.lookup activeLabel regMap of
       Just _ -> throwError $ "Variable " ++ name ++ " already defined in this scope"
       Nothing -> do
         let newRegMap = Map.insert activeLabel regName regMap
-            newActiveScope = ActiveScope (Just activeScope) (Map.insert name newRegMap (activeScopeRegisters activeScope))
+            newActiveScope = ActiveScope (Just activeScope) (Map.insert name newRegMap (activeScopeRegisters activeScope)) sources
         modify $ \s -> s { irgActiveScope = newActiveScope }
         return ()
     Nothing -> do
       let newRegMap = Map.singleton activeLabel regName
-          newActiveScope = ActiveScope (Just activeScope) (Map.insert name newRegMap (activeScopeRegisters activeScope))
+          newActiveScope = ActiveScope (Just activeScope) (Map.insert name newRegMap (activeScopeRegisters activeScope)) sources
       modify $ \s -> s { irgActiveScope = newActiveScope }
       return ()
 
 lookupVar :: String -> IRGenM (Maybe RegName)
 lookupVar name = do
   activeScope <- gets irgActiveScope
-  let regName = lookupVar' name activeScope
-  case regName of
-    Just reg -> return (Just reg)
-    Nothing -> throwError $ "Variable " ++ name ++ " not found in scope"
+  lookupVar' name activeScope
   where
-    lookupVar' :: String -> ActiveScope -> Maybe RegName
-    lookupVar' name (ActiveScope parent activeRegisters) = case Map.lookup name activeRegisters of
-      Just regMap -> case Map.lookup (irgActiveLabel defaultState) regMap of
-        Just regName -> Just regName
+    lookupVar' :: String -> ActiveScope -> IRGenM (Maybe RegName)
+    lookupVar' name (ActiveScope parent activeRegisters sources) = do
+      activeLabel <- gets irgActiveLabel
+      case Map.lookup name activeRegisters of
+        Just regMap -> case Map.lookup activeLabel regMap of
+          Just regName -> do
+            let isInSource = Set.member activeLabel (Map.findWithDefault Set.empty name sources)
+            if isInSource then return (Just regName) else do
+              newRegName <- getNextRegister
+              let phiRegs = Map.toList regMap
+                  phiValues = [(label, reg) | (label, reg) <- phiRegs, label /= activeLabel]
+              addInstruction $ IR.Phi newRegName phiValues
+              return (Just newRegName)
+          Nothing -> case parent of
+            Just parentScope -> lookupVar' name parentScope
+            Nothing -> throwError $ "Variable " ++ name ++ " not found in scope"
         Nothing -> case parent of
           Just parentScope -> lookupVar' name parentScope
-          Nothing -> Nothing
-      Nothing -> case parent of
-        Just parentScope -> lookupVar' name parentScope
-        Nothing -> Nothing
+          Nothing -> throwError $ "Variable " ++ name ++ " not found in scope"
 
 updateVar :: String -> RegName -> IRGenM ()
 updateVar name regName = do
   activeScope <- gets irgActiveScope
   activeLabel <- gets irgActiveLabel
-  case updateVar' name regName activeScope of
+  case updateVar' name activeLabel regName activeScope of
     Right newActiveScope -> modify $ \s -> s { irgActiveScope = newActiveScope }
     Left err -> throwError err
   where
-    updateVar' :: String -> RegName -> ActiveScope -> Either String ActiveScope
-    updateVar' name regName (ActiveScope parent activeRegisters) = case Map.lookup name activeRegisters of
-      Just regMap -> let newRegMap = Map.insert (irgActiveLabel defaultState) regName regMap
-                     in Right $ ActiveScope parent (Map.insert name newRegMap activeRegisters)
-      Nothing -> case parent of
-        Just parentScope -> case updateVar' name regName parentScope of
-            Right newParentScope -> Right $ ActiveScope (Just newParentScope) activeRegisters
-            Left err -> Left err
-        Nothing -> Left $ "Variable " ++ name ++ " not found in scope"
+    updateVar' :: String -> LabelRef -> RegName -> ActiveScope -> Either String ActiveScope
+    updateVar' name activeLabel regName (ActiveScope parent activeRegisters sources) = do
+      case Map.lookup name activeRegisters of
+        Just regMap -> let newRegMap = Map.insert activeLabel regName regMap
+                           sources' = Map.insert name (Set.insert activeLabel (Map.findWithDefault Set.empty name sources)) sources
+                      in Right $ ActiveScope parent (Map.insert name newRegMap activeRegisters) sources'
+        Nothing -> case parent of
+          Just parentScope -> case updateVar' name activeLabel regName parentScope of
+              Right newParentScope -> Right $ ActiveScope (Just newParentScope) activeRegisters sources
+              Left err -> Left err
+          Nothing -> Left $ "Variable " ++ name ++ " not found in scope"
 
 startActiveScope :: IRGenM ()
 startActiveScope = do
   activeScope <- gets irgActiveScope
-  let newActiveScope = ActiveScope (Just activeScope) Map.empty
+  let newActiveScope = ActiveScope (Just activeScope) Map.empty Map.empty
   modify $ \s -> s { irgActiveScope = newActiveScope }
   return ()
 
@@ -246,10 +257,82 @@ compileStatement :: AST.Statement -> IRGenM ()
 compileStatement (AST.InnerDecl innerDecl) = compileInnerDeclaration innerDecl
 compileStatement (AST.Return expr) = compileReturn expr
 compileStatement (AST.Assignment varName expr) = void $ compileAssignment varName expr
+compileStatement (AST.If cond trueBranch elseBranch) = compileIfStatement cond trueBranch elseBranch
+compileStatement (AST.While cond body) = compileWhileStatement cond body
+compileStatement (AST.For maybeInit maybeCond maybeStep body) = compileForStatement maybeInit maybeCond maybeStep body
 compileStatement (AST.BlockBody stmts) = do
   startActiveScope
   mapM_ compileStatement stmts
   endActiveScope
+
+compileIfStatement :: AST.Expression -> AST.Statement -> Maybe AST.Statement -> IRGenM ()
+compileIfStatement cond trueBranch Nothing = do
+  condReg <- compileExpression cond
+  trueLabel <- nextLabel "if_true"
+  endLabel <- nextLabel "if_end"
+  currentLabel <- gets irgActiveLabel
+  addInstruction $ IR.JmpIf (Register condReg) trueLabel endLabel
+  startBlock trueLabel currentLabel
+  startActiveScope
+  compileStatement trueBranch
+  endActiveScope
+  addInstruction $ IR.Jmp endLabel
+  startBlock endLabel currentLabel
+compileIfStatement cond trueBranch (Just falseBranch) = do
+  condReg <- compileExpression cond
+  trueLabel <- nextLabel "if_true"
+  falseLabel <- nextLabel "if_false"
+  endLabel <- nextLabel "if_end"
+  currentLabel <- gets irgActiveLabel
+  addInstruction $ IR.JmpIf (Register condReg) trueLabel falseLabel
+  startBlock trueLabel currentLabel
+  startActiveScope
+  compileStatement trueBranch
+  endActiveScope
+  addInstruction $ IR.Jmp endLabel
+  startBlock falseLabel currentLabel
+  startActiveScope
+  compileStatement falseBranch
+  endActiveScope
+  addInstruction $ IR.Jmp endLabel
+  startBlock endLabel currentLabel
+
+compileWhileStatement :: AST.Expression -> AST.Statement -> IRGenM ()
+compileWhileStatement cond body = do
+  startLabel <- nextLabel "while_start"
+  endLabel <- nextLabel "while_end"
+  currentLabel <- gets irgActiveLabel
+  addInstruction $ IR.Jmp startLabel
+  startBlock startLabel currentLabel
+  condReg <- compileExpression cond
+  addInstruction $ IR.JmpIf (Register condReg) endLabel startLabel
+  startActiveScope
+  compileStatement body
+  endActiveScope
+  addInstruction $ IR.Jmp startLabel
+  startBlock endLabel currentLabel
+
+compileForStatement :: Maybe AST.InnerDeclaration -> Maybe AST.Expression -> Maybe AST.Expression -> AST.Statement -> IRGenM ()
+compileForStatement maybeInit maybeCond maybeStep body = do
+  startLabel <- nextLabel "for_start"
+  endLabel <- nextLabel "for_end"
+  currentLabel <- gets irgActiveLabel
+  addInstruction $ IR.Jmp startLabel
+  startBlock startLabel currentLabel
+  case maybeInit of
+    Just (AST.InnerDeclaration name (AST.InnerVarDeclarationValue varDef)) -> compileInnerVarDeclaration name varDef
+    Nothing -> return ()
+  case maybeCond of
+    Just cond -> do
+      condReg <- compileExpression cond
+      addInstruction $ IR.JmpIf (Register condReg) endLabel startLabel
+    Nothing -> return ()
+  startActiveScope
+  compileStatement body
+  endActiveScope
+  -- TODO: Handle step expression
+  addInstruction $ IR.Jmp startLabel
+  startBlock endLabel currentLabel
 
 compileInnerDeclaration :: AST.InnerDeclaration -> IRGenM ()
 compileInnerDeclaration (AST.InnerDeclaration name (AST.InnerVarDeclarationValue varDef)) = compileInnerVarDeclaration name varDef
@@ -323,4 +406,9 @@ irBinOp "-" = Sub
 irBinOp "*" = Mul
 irBinOp "/" = Div
 irBinOp "==" = Eq
+irBinOp "<" = Lt
+irBinOp ">" = Gt
+irBinOp "<=" = Le
+irBinOp ">=" = Ge
+irBinOp "!=" = Ne
 irBinOp _ = error "Unknown binary operator"

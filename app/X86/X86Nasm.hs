@@ -33,6 +33,11 @@ instrToNasm (Pop reg) = "pop " ++ registerToNasm reg
 instrToNasm (Jmp (Label label)) = "jmp " ++ label
 instrToNasm (Je (Label label)) = "je " ++ label
 instrToNasm (Sete reg) = "sete " ++ registerToNasm8 reg
+instrToNasm (Setne reg) = "setne " ++ registerToNasm8 reg
+instrToNasm (Setl reg) = "setl " ++ registerToNasm8 reg
+instrToNasm (Setle reg) = "setle " ++ registerToNasm8 reg
+instrToNasm (Setg reg) = "setg " ++ registerToNasm8 reg
+instrToNasm (Setge reg) = "setge " ++ registerToNasm8 reg
 instrToNasm (Movzx dest src) = "movzx " ++ registerToNasm dest ++ ", " ++ registerToNasm8 src
 instrToNasm Ret = "ret"
 

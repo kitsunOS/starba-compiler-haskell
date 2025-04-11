@@ -77,7 +77,7 @@ instance Show Instruction where
       showPairs = unwords . map (\(l, r) -> show l ++ " " ++ show r)
 
 data BinOpType
-  = Add | Sub | Mul | Div | Eq
+  = Add | Sub | Mul | Div | Eq | Lt | Gt | Le | Ge | Ne
   deriving (Eq)
 
 instance Show BinOpType where
@@ -86,6 +86,11 @@ instance Show BinOpType where
   show Mul = "*"
   show Div = "/"
   show Eq = "=="
+  show Lt = "<"
+  show Gt = ">"
+  show Le = "<="
+  show Ge = ">="
+  show Ne = "!="
 
 data Literal
   = IntLiteral Int

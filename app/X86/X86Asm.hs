@@ -29,6 +29,11 @@ data Instr
   | Jmp Label
   | Je Label
   | Sete Register8
+  | Setne Register8
+  | Setl Register8
+  | Setle Register8
+  | Setg Register8
+  | Setge Register8
   | Movzx Register32 Register8
   | Ret
   deriving (Show, Eq)

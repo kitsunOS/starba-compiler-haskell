@@ -144,7 +144,10 @@ parseReturn = do
 
 parseControl :: Parser Statement
 parseControl = choice
-  [ parseIf ]
+  [ try parseIf
+  , try parseWhile
+  , parseFor
+  ]
 
 parseIf :: Parser Statement
 parseIf = do
@@ -157,6 +160,26 @@ parseIf = do
     reserved "else"
     parseStatement
   return $ If condition thenBlock elseBlock
+
+parseWhile :: Parser Statement
+parseWhile = do
+  reserved "while"
+  symbol "("
+  condition <- parseExpression
+  symbol ")"
+  While condition <$> parseStatement
+
+parseFor :: Parser Statement
+parseFor = do
+  reserved "for"
+  symbol "("
+  initDecl <- optionMaybe parseInnerDeclaration
+  symbol ";"
+  condition <- optionMaybe parseExpression
+  symbol ";"
+  increment <- optionMaybe parseExpression
+  symbol ")"
+  For initDecl condition increment <$> parseStatement
 
 parseExpression :: Parser Expression
 parseExpression = choice
@@ -176,7 +199,9 @@ parseTernary = do
 parseBinary :: Parser Expression
 parseBinary = buildExpressionParser ops parseTerm where
   ops = [
-      [binary "==" AssocLeft, binary "!=" AssocLeft],
+      [binary "==" AssocLeft, binary "!=" AssocLeft,
+        binary "<" AssocLeft, binary "<=" AssocLeft,
+        binary ">" AssocLeft, binary ">=" AssocLeft],
       [binary "*" AssocLeft, binary "/" AssocLeft],
       [binary "+" AssocLeft, binary "-" AssocLeft]
     ]
