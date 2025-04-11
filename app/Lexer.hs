@@ -6,7 +6,10 @@ import qualified Text.Parsec.Token as Token
 
 languageDef :: LanguageDef ()
 languageDef = emptyDef {
-  Token.reservedNames = ["fn"]
+  Token.reservedNames = ["fn"],
+  Token.commentLine = "//",
+  Token.commentStart = "/*",
+  Token.commentEnd = "*/"
 }
 
 lexer :: Token.TokenParser ()

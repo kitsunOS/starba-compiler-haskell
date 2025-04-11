@@ -47,59 +47,73 @@ safeExit (instr : rest) = case instr of
   Asm.Ret -> safeExitFooter ++ if null rest then [] else safeExit rest
   Asm.Jmp _ -> [ instr ]
   _ -> instr : safeExit rest
+
+-- TODO: Is the validOperand a good approach? Or should this be handled elsewhere?
 generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
 generateInstructions ctx (Ret (Just value)) = [
   Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx value),
   Asm.Ret
   ]
 generateInstructions ctx (Ret Nothing) = [Asm.Ret]
-generateInstructions ctx (Set dest src) = [Asm.Mov (generateOperand ctx dest) (generateOperand ctx src)]
+generateInstructions ctx (Set dest src) = [Asm.Mov rDest rSrc1 | validOperand ctx dest]
+  where
+    rDest = generateOperand ctx dest
+    rSrc1 = generateOperand ctx src
 generateInstructions ctx (BinOp IR.Add dest src1 src2)
+  | not (validOperand ctx dest) = []
   | rDest == rSrc1 = [
-    Asm.Add (generateOperand ctx dest) (generateOperand ctx src2)]
+    Asm.Add rDest rSrc2]
   | rDest == rSrc2 = [
-    Asm.Add (generateOperand ctx dest) (generateOperand ctx src1)]
+    Asm.Add rDest rSrc1]
   | otherwise = [
-    Asm.Mov (generateOperand ctx dest) (generateOperand ctx src2),
-    Asm.Add (generateOperand ctx dest) (generateOperand ctx src1)]
+    Asm.Mov rDest rSrc2,
+    Asm.Add rDest rSrc1]
   where
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
 generateInstructions ctx (BinOp IR.Sub dest src1 src2)
+  | not (validOperand ctx dest) = []
   | rDest == rSrc1 = [
-    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src2)]
+    Asm.Sub rDest rSrc2]
   | rDest == rSrc2 = [
-    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src1)]
+    Asm.Sub rDest rSrc1]
   | otherwise = [
-    Asm.Mov (generateOperand ctx dest) (generateOperand ctx src2),
-    Asm.Sub (generateOperand ctx dest) (generateOperand ctx src1)]
+    Asm.Mov rDest rSrc2,
+    Asm.Sub rDest rSrc1]
   where
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp IR.Mul dest src1 src2) = [
+generateInstructions ctx (BinOp IR.Mul dest src1 src2) = if not (validOperand ctx dest) then [] else [
   -- TODO: Does EDX need to be 0?
-  Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
-  Asm.Mul (generateOperand ctx src2),
-  Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
+  Asm.Mov (Asm.Register Asm.EAX) rSrc1,
+  Asm.Mul rSrc2,
+  Asm.Mov rDest (Asm.Register Asm.EAX)
   ]
-generateInstructions ctx (BinOp IR.Div dest src1 src2) = [
+  where
+    rDest = generateOperand ctx dest
+    rSrc1 = generateOperand ctx src1
+    rSrc2 = generateOperand ctx src2
+generateInstructions ctx (BinOp IR.Div dest src1 src2) = if not (validOperand ctx dest) then [] else [
   Asm.Mov (Asm.Register Asm.EDX) (Asm.Immediate 0),
-  Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx src1),
-  Asm.Div (generateOperand ctx src2),
-  Asm.Mov (generateOperand ctx dest) (Asm.Register Asm.EAX)
+  Asm.Mov (Asm.Register Asm.EAX) rSrc1,
+  Asm.Div rSrc2,
+  Asm.Mov rDest (Asm.Register Asm.EAX)
   ]
-generateInstructions ctx (BinOp IR.Eq dest src1 src2) = 
-  let 
+  where
+    rDest = generateOperand ctx dest
+    rSrc1 = generateOperand ctx src1
+    rSrc2 = generateOperand ctx src2
+generateInstructions ctx (BinOp IR.Eq dest src1 src2) = if not (validOperand ctx dest) then [] else [
+  Asm.Cmp rSrc1 rSrc2,
+  Asm.Sete (Asm.reg32To8 rDest),
+  Asm.Movzx rDest (Asm.reg32To8 rDest)
+  ]
+  where
     rDest = requireReg32 (generateOperand ctx dest)
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-  in [
-    Asm.Cmp rSrc1 rSrc2,
-    Asm.Sete (Asm.reg32To8 rDest),
-    Asm.Movzx rDest (Asm.reg32To8 rDest)
-    ]
 generateInstructions ctx (Jmp (LabelRef label)) = [Asm.Jmp (Asm.Label label)]
 generateInstructions ctx (JmpIf cond (LabelRef trueLabel) (LabelRef falseLabel)) = [
   Asm.Cmp (generateOperand ctx cond) (Asm.Immediate 0),
@@ -128,6 +142,10 @@ generateOperand _ (IR.Immediate imm) = Asm.Immediate imm
 generateOperand _ (IR.LabelReference (IR.LabelRef labelName)) = Asm.LabelRef (Asm.Label labelName)
 generateOperand _ (IR.SymbolReference symbolName) = Asm.LabelRef (Asm.Label symbolName)
 -- TODO: Labels and symbols should probably differ?
+
+validOperand :: GenerationContext -> IR.Value -> Bool
+validOperand ctx (IR.Register regName) = Map.member regName (RegAlloc.allocatedRegisters (gAllocation ctx))
+validOperand _ _ = True
 
 requireReg32 :: Asm.Operand -> Asm.Register32
 requireReg32 (Asm.Register reg) = reg

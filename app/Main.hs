@@ -68,7 +68,7 @@ run filename outname = do
   liftIO $ print interferences
   liftIO $ print ""
 
-  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX])
+  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX, X86Asm.ESI, X86Asm.EDI])
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 

@@ -111,7 +111,7 @@ interferences :: (Ord a, Register.Register a) => RegAllocContext a -> IR.Block -
 interferences ctx block liveSets = foldl (collapseMap ctx) Map.empty (zip (IR.blockInstructions block) (liveInstrs liveSets))
   where
     collapseMap :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> InterferenceGraph a0 -> (IR.Instruction, Set.Set (IR.RegEntry a0)) -> InterferenceGraph a0
-    collapseMap ctx map' (instr, live) = insertPhysDefs (insertDefs map' (IRIA.uses instr) live) (intLive ctx instr) live
+    collapseMap ctx map' (instr, live) = insertPhysDefs (insertDefs map' (IRIA.uses instr ++ IRIA.defs instr) live) (intLive ctx instr) live
     insertDefs :: (Ord a0, Register.Register a0) => InterferenceGraph a0 -> [IR.RegName] -> Set.Set (IR.RegEntry a0) -> InterferenceGraph a0
     insertDefs map' uses live = foldl (\m u -> insertDef (live Set.\\ Set.singleton (IR.Virtual u)) m u) map' uses
     insertDef :: (Ord a0, Register.Register a0) => Set.Set (IR.RegEntry a0) -> InterferenceGraph a0 -> IR.RegName -> InterferenceGraph a0

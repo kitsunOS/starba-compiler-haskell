@@ -111,7 +111,8 @@ parseStatement = choice
   [ try parseReturn <* symbol ";"
   , try parseControl
   , try parseInnerDecl <* symbol ";"
-  , parseAssignment <* symbol ";"
+  , try parseAssignment <* symbol ";"
+  , parseBlock
   ]
 
 parseInnerDecl :: Parser Statement
@@ -119,9 +120,22 @@ parseInnerDecl = InnerDecl <$> parseInnerDeclaration
 
 parseAssignment :: Parser Statement
 parseAssignment = do
-  variableDefinition <- parseVariableDefinition
+  varRef <- identifier
   symbol "="
-  Assignment variableDefinition <$> parseExpression
+  Assignment varRef <$> parseExpression
+
+parseBlock :: Parser Statement
+parseBlock = do
+  symbol "{"
+  statements <- many parseStatement
+  symbol "}"
+  return $ BlockBody statements
+
+parseAssignExpr :: Parser Expression
+parseAssignExpr = do
+  varRef <- identifier
+  symbol "="
+  AssignExpr varRef <$> parseExpression
 
 parseReturn :: Parser Statement
 parseReturn = do
@@ -147,6 +161,7 @@ parseIf = do
 parseExpression :: Parser Expression
 parseExpression = choice
   [ try parseTernary
+  , try parseAssignExpr
   , parseBinary
   ]
 

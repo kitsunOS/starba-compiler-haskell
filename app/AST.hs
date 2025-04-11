@@ -64,9 +64,10 @@ data EnumMemberAssign = EnumMember {
 
 data Statement =
   InnerDecl InnerDeclaration
-  | Assignment VariableDefinition Expression
+  | Assignment String Expression
   | Return (Maybe Expression)
   | If Expression Statement (Maybe Statement)
+  | BlockBody [Statement]
   deriving (Show, Eq)
 
 data Expression =
@@ -75,6 +76,7 @@ data Expression =
   | Variable String
   | BinOp String Expression Expression
   | Ternary Expression Expression Expression
+  | AssignExpr String Expression
   deriving (Show, Eq)
 
 data Type = Type {
