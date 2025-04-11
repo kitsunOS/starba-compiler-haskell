@@ -1,6 +1,6 @@
 module X86.X86Reg where
 import qualified X86.X86Asm as Asm
-import qualified IR
+import qualified IR.IR as IR
 
 intLive :: IR.Instruction -> [IR.RegEntry Asm.Register32]
 intLive (IR.Ret _) = []

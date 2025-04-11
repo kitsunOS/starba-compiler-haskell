@@ -5,7 +5,7 @@ import Text.Parsec.String (Parser)
 
 import Data.Functor (($>))
 
-import AST
+import AST.AST
 import Lexer
 import Data.List (intercalate)
 import Text.Parsec.Expr (buildExpressionParser, Assoc (AssocLeft), Operator(Infix))

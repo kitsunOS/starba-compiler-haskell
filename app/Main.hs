@@ -11,17 +11,17 @@ import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
 
 import Parser
-import AST
-import IRGen (compileModule)
+import AST.AST
+import IR.IRGen (compileModule)
 import qualified X86.X86Gen as X86Gen
 import qualified X86.X86Nasm as X86Nasm
 import Data.Bifunctor (first)
 import qualified RegAlloc
-import qualified IR
+import qualified IR.IR as IR
 import qualified Data.Set as Set
 import qualified X86.X86Asm as X86Asm
 import qualified X86.X86Reg as X86Reg
-import qualified IRPhiElim
+import qualified IR.IRPhiElim
 import qualified Data.Map as Map
 
 main :: IO ()
@@ -49,7 +49,7 @@ run filename outname = do
   liftIO $ print ir1
   liftIO $ print ""
 
-  let ir = IRPhiElim.rewriteModule ir1
+  let ir = IR.IRPhiElim.rewriteModule ir1
   liftIO $ print ir
   liftIO $ print ""
 

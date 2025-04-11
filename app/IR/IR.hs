@@ -1,4 +1,4 @@
-module IR where
+module IR.IR where
 import Data.Map (Map)
 import Data.List (intercalate)
 

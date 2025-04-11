@@ -1,7 +1,10 @@
-module IRGen (compileModule) where
+module IR.IRGen (compileModule) where
 
-import qualified AST
-import IR
+import qualified AST.AST as AST
+import IR.IR (
+  Module(..), Procedure(..), Block(..), Instruction(..), RegName(..),
+  LabelRef(..), Value(..), SymbolTable(..), FieldTable(..), VarRef)
+import qualified IR.IR as IR
 import qualified Data.Map as Map
 import Control.Monad.State
 import Control.Monad.Except
@@ -232,7 +235,7 @@ compileVarDeclaration :: String -> AST.Visibility -> AST.VariableDefinition -> I
 compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
   let
     -- TODO: Evaluate the actual initializer
-    fieldTable = FieldTable $ Map.singleton name (IntLiteral 0)
+    fieldTable = FieldTable $ Map.singleton name (IR.IntLiteral 0)
   in
     return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
 
@@ -400,15 +403,15 @@ compileExpression (AST.Ternary cond trueExpr falseExpr) = do
 compileExpression (AST.AssignExpr var expr) = compileAssignment var expr
 
 
-irBinOp :: String -> BinOpType
-irBinOp "+" = Add
-irBinOp "-" = Sub
-irBinOp "*" = Mul
-irBinOp "/" = Div
-irBinOp "==" = Eq
-irBinOp "<" = Lt
-irBinOp ">" = Gt
-irBinOp "<=" = Le
-irBinOp ">=" = Ge
-irBinOp "!=" = Ne
+irBinOp :: String -> IR.BinOpType
+irBinOp "+" = IR.Add
+irBinOp "-" = IR.Sub
+irBinOp "*" = IR.Mul
+irBinOp "/" = IR.Div
+irBinOp "==" = IR.Eq
+irBinOp "<" = IR.Lt
+irBinOp ">" = IR.Gt
+irBinOp "<=" = IR.Le
+irBinOp ">=" = IR.Ge
+irBinOp "!=" = IR.Ne
 irBinOp _ = error "Unknown binary operator"

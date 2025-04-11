@@ -1,7 +1,8 @@
 module X86.X86Gen where
 
 import qualified X86.X86Asm as Asm
-import IR
+import IR.IR (Module(..), Procedure(..), Block(..), Instruction(..), LabelRef(..), SymbolTable(..))
+import qualified IR.IR as IR
 import qualified Data.Map as Map
 import qualified RegAlloc
 import qualified Debug.Trace as Debug

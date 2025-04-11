@@ -1,12 +1,11 @@
 module RegAlloc where
-import qualified IR
-import qualified IRInstrAnalysis as IRIA
+import qualified IR.IR as IR
+import qualified IR.IRInstrAnalysis as IRIA
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Register
-import Data.Foldable (maximumBy, Foldable (fold))
+import Data.Foldable (maximumBy)
 import Data.Ord (comparing)
-import qualified X86.X86Reg as X86Reg
 import qualified Debug.Trace as Debug
 
 data BlockUseDefs a = BlockUseDefs {

@@ -1,4 +1,4 @@
-module AST where
+module AST.AST where
 
 newtype Module = Module {
   declarations :: [Declaration]
@@ -68,7 +68,7 @@ data Statement =
   | Return (Maybe Expression)
   | If Expression Statement (Maybe Statement)
   | While Expression Statement
-  | For (Maybe AST.InnerDeclaration) (Maybe Expression) (Maybe Expression) Statement
+  | For (Maybe InnerDeclaration) (Maybe Expression) (Maybe Expression) Statement
   | BlockBody [Statement]
   deriving (Show, Eq)
 

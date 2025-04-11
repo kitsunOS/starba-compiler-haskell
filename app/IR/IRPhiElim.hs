@@ -1,6 +1,6 @@
-module IRPhiElim where
+module IR.IRPhiElim where
 
-import qualified IR
+import qualified IR.IR as IR
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 

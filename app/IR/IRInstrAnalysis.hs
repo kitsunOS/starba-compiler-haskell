@@ -1,6 +1,6 @@
-module IRInstrAnalysis where
+module IR.IRInstrAnalysis where
 
-import qualified IR
+import qualified IR.IR as IR
 
 defs :: IR.Instruction -> [IR.RegName]
 defs (IR.Ret _) = []
