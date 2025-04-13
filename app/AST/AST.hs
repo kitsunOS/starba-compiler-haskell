@@ -1,18 +1,23 @@
 module AST.AST where
 
-newtype Module = Module {
-  declarations :: [Declaration]
+newtype Module sym = Module {
+  declarations :: [Declaration sym]
 } deriving (Show, Eq)
 
-data Declaration = Declaration {
-  declName :: String,
+data Declaration sym = Declaration {
+  declName :: sym,
   declVisibility :: Visibility,
-  declValue :: DeclarationValue
+  declValue :: DeclarationValue sym
 } deriving (Show, Eq)
 
-data InnerDeclaration = InnerDeclaration {
-  iDeclName :: String,
-  iDeclValue :: InnerDeclarationValue
+data InnerDeclaration sym = InnerDeclaration {
+  iDeclName :: sym,
+  iDeclValue :: InnerDeclarationValue sym
+} deriving (Show, Eq)
+
+data Parameter sym = Parameter {
+  paramName :: sym,
+  paramType :: Type sym
 } deriving (Show, Eq)
 
 data Visibility =
@@ -20,67 +25,75 @@ data Visibility =
   Private
   deriving (Show, Eq)
 
-data DeclarationValue =
-  VarDeclarationValue VariableDefinition |
-  FuncDeclarationValue FunctionDefinition |
-  EnumDeclarationValue EnumDefinition
+data DeclarationValue sym =
+  VarDeclarationValue (VariableDefinition sym) |
+  FuncDeclarationValue (FunctionDefinition sym) |
+  EnumDeclarationValue (EnumDefinition sym)
   deriving (Show, Eq)
 
-newtype InnerDeclarationValue =
-  InnerVarDeclarationValue VariableDefinition
+newtype InnerDeclarationValue sym =
+  InnerVarDeclarationValue (VariableDefinition sym)
   deriving (Show, Eq)
 
-data VariableDefinition = VariableDefinition {
-  variableType :: Type,
-  initializer :: Maybe Expression
+data VariableDefinition sym = VariableDefinition {
+  variableType :: Type sym,
+  initializer :: Maybe (Expression sym)
 } deriving (Show, Eq)
 
-data FunctionDefinition = FunctionDefinition {
-  functionDefParameters :: [VariableDefinition],
-  functionDefType :: Type,
-  functionDefBody :: Maybe FunctionBody
+data FunctionDefinition sym = FunctionDefinition {
+  functionDefParameters :: [Parameter sym],
+  functionDefType :: Type sym,
+  functionDefBody :: Maybe (FunctionBody sym)
 } deriving (Show, Eq)
 
-newtype FunctionBody = FunctionBody {
-  functionBodyStatements :: [Statement]
+newtype FunctionBody sym = FunctionBody {
+  functionBodyStatements :: [Statement sym]
 } deriving (Show, Eq)
 
-data EnumDefinition = EnumDefinition {
-  enumName :: String,
-  enumValues :: [EnumValue],
-  enumMembers :: [InnerDeclaration]
+data EnumDefinition sym = EnumDefinition {
+  enumName :: sym,
+  enumValues :: [EnumValue sym],
+  enumMembers :: [InnerDeclaration sym]
 } deriving (Show, Eq)
 
-data EnumValue = EnumValue {
-  enumValueName :: String,
-  enumParameters :: [VariableDefinition],
-  enumMemberAssign :: [EnumMemberAssign]
+data EnumValue sym = EnumValue {
+  enumValueName :: sym,
+  enumParameters :: [Parameter sym],
+  enumMemberAssign :: [EnumMemberAssign sym]
 } deriving (Show, Eq)
 
-data EnumMemberAssign = EnumMember {
-  enumMemberName :: String,
-  enumMemberValue :: Expression
+data EnumMemberAssign sym = EnumMember {
+  enumMemberName :: sym,
+  enumMemberValue :: Expression sym
 } deriving (Show, Eq)
 
-data Statement =
-  InnerDecl InnerDeclaration
-  | Assignment String Expression
-  | Return (Maybe Expression)
-  | If Expression Statement (Maybe Statement)
-  | While Expression Statement
-  | For (Maybe InnerDeclaration) (Maybe Expression) (Maybe Expression) Statement
-  | BlockBody [Statement]
+data Statement sym =
+  InnerDecl (InnerDeclaration sym)
+  | Assignment sym (Expression sym)
+  | Return (Maybe (Expression sym))
+  | If (Expression sym) (Statement sym) (Maybe (Statement sym))
+  | While (Expression sym) (Statement sym)
+  | For (Maybe (InnerDeclaration sym)) (Maybe (Expression sym)) (Maybe (Expression sym)) (Statement sym)
+  | BlockBody [Statement sym]
   deriving (Show, Eq)
 
-data Expression =
+data Expression sym =
   NumberLiteral Integer
   | StringLiteral String
-  | Variable String
-  | BinOp String Expression Expression
-  | Ternary Expression Expression Expression
-  | AssignExpr String Expression
+  | Variable sym
+  | BinOp String (Expression sym) (Expression sym)
+  | Ternary (Expression sym) (Expression sym) (Expression sym)
+  | AssignExpr sym (Expression sym)
   deriving (Show, Eq)
 
-data Type = Type {
-  typeName :: String
+data Type sym = Type {
+  typeName :: sym
 } | Void deriving (Show, Eq)
+
+data Symbol = Symbol
+  { symbolName :: String
+  , symbolId :: Int
+  } deriving (Eq, Ord)
+
+instance Show Symbol where
+  show (Symbol name id) = name ++ "#" ++ show id

@@ -23,6 +23,7 @@ import qualified X86.X86Asm as X86Asm
 import qualified X86.X86Reg as X86Reg
 import qualified IR.IRPhiElim
 import qualified Data.Map as Map
+import qualified AST.ASTSymbolRes as ASTSymbolRes
 
 main :: IO ()
 main = do
@@ -40,7 +41,8 @@ run :: String -> String -> ExceptT String IO ()
 run filename outname = do
   contents <- liftIO $ readFile filename
 
-  ast <- ExceptT $ pure $ first show $ parse parseModule filename contents
+  rawAst <- ExceptT $ pure $ first show $ parse parseModule filename contents
+  let ast = ASTSymbolRes.resolveSymbols rawAst
 
   liftIO $ print ast
   liftIO $ print ""

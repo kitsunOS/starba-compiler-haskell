@@ -22,7 +22,8 @@ maintainer:         jasontopia03@gmail.com
 
 executable starba
     main-is:          Main.hs
-    other-modules:    Parser, AST.AST, Lexer, Register, RegAlloc,
+    other-modules:    Parser, Lexer, Register, RegAlloc,
+                      AST.AST, AST.ASTSymbolRes,
                       IR.IR, IR.IRGen, IR.IRInstrAnalysis, IR.IRPhiElim,
                       X86.X86Gen, X86.X86Asm, X86.X86Nasm, X86.X86Reg
 

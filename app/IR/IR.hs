@@ -1,4 +1,6 @@
 module IR.IR where
+
+import qualified AST.AST as AST
 import Data.Map (Map)
 import Data.List (intercalate)
 
@@ -46,7 +48,7 @@ instance Show Value where
   show (LabelReference (LabelRef l)) = l
   show (SymbolReference s) = s
 
-type VarRef = String
+type VarRef = AST.Symbol
 
 newtype LabelRef = LabelRef String
   deriving (Eq, Ord)

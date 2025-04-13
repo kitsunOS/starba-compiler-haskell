@@ -1,3 +1,5 @@
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module Parser where
 
 import Text.Parsec
@@ -10,13 +12,15 @@ import Lexer
 import Data.List (intercalate)
 import Text.Parsec.Expr (buildExpressionParser, Assoc (AssocLeft), Operator(Infix))
 
-parseModule :: Parser Module
+type Sym = String
+
+parseModule :: Parser (Module Sym)
 parseModule = do
   declarations <- many parseDeclaration
   eof
   return $ Module declarations
 
-parseDeclaration :: Parser Declaration
+parseDeclaration :: Parser (Declaration Sym)
 parseDeclaration = do
   x <- identifier
   symbol ":"
@@ -28,32 +32,38 @@ parseVisibility = do
   string "+" $>  Public
   <|> return Private
 
-parseDeclarationValue :: Parser DeclarationValue
+parseDeclarationValue :: Parser (DeclarationValue Sym)
 parseDeclarationValue =
   parseVarDef
   <|> parseFuncDef
   <|> parseEnumDecl
 
-parseVarDef :: Parser DeclarationValue
+parseVarDef :: Parser (DeclarationValue Sym)
 parseVarDef = VarDeclarationValue <$> parseVariableDefinition
 
-parseFuncDef :: Parser DeclarationValue
+parseFuncDef :: Parser (DeclarationValue Sym)
 parseFuncDef = FuncDeclarationValue <$> parseFunctionDefinition
 
-parseEnumDecl :: Parser DeclarationValue
+parseEnumDecl :: Parser (DeclarationValue Sym)
 parseEnumDecl = EnumDeclarationValue <$> parseEnumDefinition
 
-parseVariableDefinition :: Parser VariableDefinition
+parseVariableDefinition :: Parser (VariableDefinition Sym)
 parseVariableDefinition = do
   typ <- parseType
   initializer <- optionMaybe $ symbol "=" *> parseExpression
   return $ VariableDefinition typ initializer
 
-parseFunctionDefinition :: Parser FunctionDefinition
+parseParameter :: Parser (Parameter Sym)
+parseParameter = do
+  name <- identifier
+  symbol ":"
+  Parameter name <$> parseType
+
+parseFunctionDefinition :: Parser (FunctionDefinition Sym)
 parseFunctionDefinition = do
   reserved "fn"
   symbol "("
-  parameters <- parseVariableDefinition `sepBy` symbol ","
+  parameters <- parseParameter `sepBy` symbol ","
   symbol ")"
   typ <- option Void $ do
     symbol "->"
@@ -61,14 +71,14 @@ parseFunctionDefinition = do
   functionBody <- optionMaybe parseFunctionBody
   return $ FunctionDefinition parameters typ functionBody
 
-parseFunctionBody :: Parser FunctionBody
+parseFunctionBody :: Parser (FunctionBody Sym)
 parseFunctionBody = do
   symbol "{"
   x <- many parseStatement
   symbol "}"
   return $ FunctionBody x
 
-parseEnumDefinition :: Parser EnumDefinition
+parseEnumDefinition :: Parser (EnumDefinition Sym)
 parseEnumDefinition = do
   reserved "enum"
   name <- identifier
@@ -79,34 +89,34 @@ parseEnumDefinition = do
   symbol "}"
   return $ EnumDefinition name values members
 
-parseEnumValue :: Parser EnumValue
+parseEnumValue :: Parser (EnumValue Sym)
 parseEnumValue = do
   name <- identifier
   parameters <- option [] $ do
-    symbol "(" *> parseVariableDefinition `sepBy` symbol "," <* symbol ")"
+    symbol "(" *> parseParameter `sepBy` symbol "," <* symbol ")"
   memberAssign <- option [] $ do
     symbol "{" *> semiSep parseEnumMemberAssign <* symbol "}"
   return $ EnumValue name parameters memberAssign
 
-parseEnumMemberAssign :: Parser EnumMemberAssign
+parseEnumMemberAssign :: Parser (EnumMemberAssign Sym)
 parseEnumMemberAssign = do
   name <- identifier
   symbol "="
   EnumMember name <$> parseExpression
 
-parseInnerDeclaration :: Parser InnerDeclaration
+parseInnerDeclaration :: Parser (InnerDeclaration Sym)
 parseInnerDeclaration = do
   x <- identifier
   symbol ":"
   InnerDeclaration x <$> parseInnerDeclarationValue
 
-parseInnerDeclarationValue :: Parser InnerDeclarationValue
+parseInnerDeclarationValue :: Parser (InnerDeclarationValue Sym)
 parseInnerDeclarationValue = parseInnerVarDef
 
-parseInnerVarDef :: Parser InnerDeclarationValue
+parseInnerVarDef :: Parser (InnerDeclarationValue Sym)
 parseInnerVarDef = InnerVarDeclarationValue <$> parseVariableDefinition
 
-parseStatement :: Parser Statement
+parseStatement :: Parser (Statement Sym)
 parseStatement = choice
   [ try parseReturn <* symbol ";"
   , try parseControl
@@ -115,41 +125,41 @@ parseStatement = choice
   , parseBlock
   ]
 
-parseInnerDecl :: Parser Statement
+parseInnerDecl :: Parser (Statement Sym)
 parseInnerDecl = InnerDecl <$> parseInnerDeclaration
 
-parseAssignment :: Parser Statement
+parseAssignment :: Parser (Statement Sym)
 parseAssignment = do
   varRef <- identifier
   symbol "="
   Assignment varRef <$> parseExpression
 
-parseBlock :: Parser Statement
+parseBlock :: Parser (Statement Sym)
 parseBlock = do
   symbol "{"
   statements <- many parseStatement
   symbol "}"
   return $ BlockBody statements
 
-parseAssignExpr :: Parser Expression
+parseAssignExpr :: Parser (Expression Sym)
 parseAssignExpr = do
   varRef <- identifier
   symbol "="
   AssignExpr varRef <$> parseExpression
 
-parseReturn :: Parser Statement
+parseReturn :: Parser (Statement Sym)
 parseReturn = do
   reserved "return"
   Return <$> optionMaybe parseExpression
 
-parseControl :: Parser Statement
+parseControl :: Parser (Statement Sym)
 parseControl = choice
   [ try parseIf
   , try parseWhile
   , parseFor
   ]
 
-parseIf :: Parser Statement
+parseIf :: Parser (Statement Sym)
 parseIf = do
   reserved "if"
   symbol "("
@@ -161,7 +171,7 @@ parseIf = do
     parseStatement
   return $ If condition thenBlock elseBlock
 
-parseWhile :: Parser Statement
+parseWhile :: Parser (Statement Sym)
 parseWhile = do
   reserved "while"
   symbol "("
@@ -169,7 +179,7 @@ parseWhile = do
   symbol ")"
   While condition <$> parseStatement
 
-parseFor :: Parser Statement
+parseFor :: Parser (Statement Sym)
 parseFor = do
   reserved "for"
   symbol "("
@@ -181,14 +191,14 @@ parseFor = do
   symbol ")"
   For initDecl condition increment <$> parseStatement
 
-parseExpression :: Parser Expression
+parseExpression :: Parser (Expression Sym)
 parseExpression = choice
   [ try parseTernary
   , try parseAssignExpr
   , parseBinary
   ]
 
-parseTernary :: Parser Expression
+parseTernary :: Parser (Expression Sym)
 parseTernary = do
   condition <- parseBinary
   symbol "?"
@@ -196,7 +206,7 @@ parseTernary = do
   symbol ":"
   Ternary condition trueBranch <$> parseExpression
 
-parseBinary :: Parser Expression
+parseBinary :: Parser (Expression Sym)
 parseBinary = buildExpressionParser ops parseTerm where
   ops = [
       [binary "==" AssocLeft, binary "!=" AssocLeft,
@@ -208,22 +218,22 @@ parseBinary = buildExpressionParser ops parseTerm where
   binary name = Infix (reserved name >> return (BinOp name))
   parseTerm = parens parseExpression <|> parseIdent <|> parseLiteral
 
-parseIdent :: Parser Expression
+parseIdent :: Parser (Expression Sym)
 parseIdent = Variable <$> identifier
 
-parseLiteral :: Parser Expression
+parseLiteral :: Parser (Expression Sym)
 parseLiteral = choice
   [ parseNumber
   , parseString
   ]
 
-parseNumber :: Parser Expression
+parseNumber :: Parser (Expression Sym)
 parseNumber = NumberLiteral <$> integer
 
-parseString :: Parser Expression
+parseString :: Parser (Expression Sym)
 parseString = StringLiteral <$> stringLiteral
 
-parseType :: Parser Type
+parseType :: Parser (Type Sym)
 parseType = Type <$> parseQualifiedName
 
 parseQualifiedName :: Parser String

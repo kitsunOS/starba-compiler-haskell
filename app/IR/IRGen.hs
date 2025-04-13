@@ -12,6 +12,8 @@ import qualified Data.Set as Set
 import qualified Data.Foldable
 
 -- Data types
+type Sym = AST.Symbol
+
 data ActiveScope = ActiveScope {
   activeScopeParent :: Maybe ActiveScope,
   activeScopeRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
@@ -107,14 +109,14 @@ allocateSymbol value = do
       return symbolName
 
 -- Variable helpers
-createVar :: String -> RegName -> IRGenM ()
+createVar :: Sym -> RegName -> IRGenM ()
 createVar name regName = do
   activeScope <- gets irgActiveScope
   activeLabel <- gets irgActiveLabel
   let sources = Map.insert name (Set.singleton activeLabel) (activeScopeSources activeScope)
   case Map.lookup name (activeScopeRegisters activeScope) of
     Just regMap -> case Map.lookup activeLabel regMap of
-      Just _ -> throwError $ "Variable " ++ name ++ " already defined in this scope"
+      Just _ -> throwError $ "Variable " ++ show name ++ " already defined in this scope"
       Nothing -> do
         let newRegMap = Map.insert activeLabel regName regMap
             newActiveScope = ActiveScope (Just activeScope) (Map.insert name newRegMap (activeScopeRegisters activeScope)) sources
@@ -126,12 +128,12 @@ createVar name regName = do
       modify $ \s -> s { irgActiveScope = newActiveScope }
       return ()
 
-lookupVar :: String -> IRGenM (Maybe RegName)
+lookupVar :: Sym -> IRGenM (Maybe RegName)
 lookupVar name = do
   activeScope <- gets irgActiveScope
   lookupVar' name activeScope
   where
-    lookupVar' :: String -> ActiveScope -> IRGenM (Maybe RegName)
+    lookupVar' :: Sym -> ActiveScope -> IRGenM (Maybe RegName)
     lookupVar' name (ActiveScope parent activeRegisters sources) = do
       activeLabel <- gets irgActiveLabel
       case Map.lookup name activeRegisters of
@@ -146,12 +148,12 @@ lookupVar name = do
               return (Just newRegName)
           Nothing -> case parent of
             Just parentScope -> lookupVar' name parentScope
-            Nothing -> throwError $ "Variable " ++ name ++ " not found in scope"
+            Nothing -> throwError $ "Variable " ++ show name ++ " not found in scope"
         Nothing -> case parent of
           Just parentScope -> lookupVar' name parentScope
-          Nothing -> throwError $ "Variable " ++ name ++ " not found in scope"
+          Nothing -> throwError $ "Variable " ++ show name ++ " not found in scope"
 
-updateVar :: String -> RegName -> IRGenM ()
+updateVar :: Sym -> RegName -> IRGenM ()
 updateVar name regName = do
   activeScope <- gets irgActiveScope
   activeLabel <- gets irgActiveLabel
@@ -159,7 +161,7 @@ updateVar name regName = do
     Right newActiveScope -> modify $ \s -> s { irgActiveScope = newActiveScope }
     Left err -> throwError err
   where
-    updateVar' :: String -> LabelRef -> RegName -> ActiveScope -> Either String ActiveScope
+    updateVar' :: Sym -> LabelRef -> RegName -> ActiveScope -> Either String ActiveScope
     updateVar' name activeLabel regName (ActiveScope parent activeRegisters sources) = do
       case Map.lookup name activeRegisters of
         Just regMap -> let newRegMap = Map.insert activeLabel regName regMap
@@ -169,7 +171,7 @@ updateVar name regName = do
           Just parentScope -> case updateVar' name activeLabel regName parentScope of
               Right newParentScope -> Right $ ActiveScope (Just newParentScope) activeRegisters sources
               Left err -> Left err
-          Nothing -> Left $ "Variable " ++ name ++ " not found in scope"
+          Nothing -> Left $ "Variable " ++ show name ++ " not found in scope"
 
 startActiveScope :: IRGenM ()
 startActiveScope = do
@@ -213,7 +215,7 @@ incrementName = reverse . increment . reverse
     increment (x:xs) = succ x : xs
 
 -- Compilation
-compileModule :: AST.Module -> Either String IR.Module
+compileModule :: AST.Module Sym -> Either String IR.Module
 compileModule (AST.Module decls) = do
   let compile = mapM compileDeclaration decls
   case runExcept (evalStateT compile defaultState) of
@@ -224,27 +226,28 @@ compileModule (AST.Module decls) = do
           fieldTable = mergeFieldTables $ map declFieldTable contributions
       in Right $ IR.Module procedures fieldTable symbolTable
 
-compileDeclaration :: AST.Declaration -> IRGenM DeclarationContribution
+compileDeclaration :: AST.Declaration Sym -> IRGenM DeclarationContribution
 compileDeclaration (AST.Declaration name visibility value) =
   case value of
     AST.VarDeclarationValue varDef -> compileVarDeclaration name visibility varDef
     AST.FuncDeclarationValue funcDef -> compileFuncDeclaration name visibility funcDef
     AST.EnumDeclarationValue enumDef -> compileEnumDeclaration name visibility enumDef
 
-compileVarDeclaration :: String -> AST.Visibility -> AST.VariableDefinition -> IRGenM DeclarationContribution
+compileVarDeclaration :: Sym -> AST.Visibility -> AST.VariableDefinition Sym -> IRGenM DeclarationContribution
 compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
   let
     -- TODO: Evaluate the actual initializer
-    fieldTable = FieldTable $ Map.singleton name (IR.IntLiteral 0)
+    -- TODO: How to format field name?
+    fieldTable = FieldTable $ Map.singleton (show name) (IR.IntLiteral 0)
   in
     return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
 
-compileEnumDeclaration :: String -> AST.Visibility -> AST.EnumDefinition -> IRGenM DeclarationContribution
+compileEnumDeclaration :: Sym -> AST.Visibility -> AST.EnumDefinition Sym -> IRGenM DeclarationContribution
 compileEnumDeclaration name visibility (AST.EnumDefinition _ values members) =
   -- TODO: Implement
   return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) (FieldTable Map.empty)
 
-compileFuncDeclaration :: String -> AST.Visibility -> AST.FunctionDefinition -> IRGenM DeclarationContribution
+compileFuncDeclaration :: Sym -> AST.Visibility -> AST.FunctionDefinition Sym -> IRGenM DeclarationContribution
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ Nothing) = throwError "Function declaration without body not yet supported"
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ (Just body)) = do
   compileFuncBody body
@@ -253,10 +256,10 @@ compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ (Just body)) = do
   symbolTable <- gets irgSymbolTable
   return $ DeclarationContribution [Procedure blocks] symbolTable (FieldTable Map.empty)
 
-compileFuncBody :: AST.FunctionBody -> IRGenM ()
+compileFuncBody :: AST.FunctionBody Sym -> IRGenM ()
 compileFuncBody (AST.FunctionBody stmts) = mapM_ compileStatement stmts
 
-compileStatement :: AST.Statement -> IRGenM ()
+compileStatement :: AST.Statement Sym -> IRGenM ()
 compileStatement (AST.InnerDecl innerDecl) = compileInnerDeclaration innerDecl
 compileStatement (AST.Return expr) = compileReturn expr
 compileStatement (AST.Assignment varName expr) = void $ compileAssignment varName expr
@@ -268,7 +271,7 @@ compileStatement (AST.BlockBody stmts) = do
   mapM_ compileStatement stmts
   endActiveScope
 
-compileIfStatement :: AST.Expression -> AST.Statement -> Maybe AST.Statement -> IRGenM ()
+compileIfStatement :: AST.Expression Sym -> AST.Statement Sym -> Maybe (AST.Statement Sym) -> IRGenM ()
 compileIfStatement cond trueBranch Nothing = do
   condReg <- compileExpression cond
   trueLabel <- nextLabel "if_true"
@@ -300,7 +303,7 @@ compileIfStatement cond trueBranch (Just falseBranch) = do
   addInstruction $ IR.Jmp endLabel
   startBlock endLabel currentLabel
 
-compileWhileStatement :: AST.Expression -> AST.Statement -> IRGenM ()
+compileWhileStatement :: AST.Expression Sym -> AST.Statement Sym -> IRGenM ()
 compileWhileStatement cond body = do
   startLabel <- nextLabel "while_start"
   endLabel <- nextLabel "while_end"
@@ -315,7 +318,7 @@ compileWhileStatement cond body = do
   addInstruction $ IR.Jmp startLabel
   startBlock endLabel currentLabel
 
-compileForStatement :: Maybe AST.InnerDeclaration -> Maybe AST.Expression -> Maybe AST.Expression -> AST.Statement -> IRGenM ()
+compileForStatement :: Maybe (AST.InnerDeclaration Sym) -> Maybe (AST.Expression Sym) -> Maybe (AST.Expression Sym) -> AST.Statement Sym -> IRGenM ()
 compileForStatement maybeInit maybeCond maybeStep body = do
   startLabel <- nextLabel "for_start"
   endLabel <- nextLabel "for_end"
@@ -337,22 +340,22 @@ compileForStatement maybeInit maybeCond maybeStep body = do
   addInstruction $ IR.Jmp startLabel
   startBlock endLabel currentLabel
 
-compileInnerDeclaration :: AST.InnerDeclaration -> IRGenM ()
+compileInnerDeclaration :: AST.InnerDeclaration Sym -> IRGenM ()
 compileInnerDeclaration (AST.InnerDeclaration name (AST.InnerVarDeclarationValue varDef)) = compileInnerVarDeclaration name varDef
 
-compileInnerVarDeclaration :: String -> AST.VariableDefinition -> IRGenM ()
+compileInnerVarDeclaration :: Sym -> AST.VariableDefinition Sym -> IRGenM ()
 compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
   regName <- compileExpression initializer
   createVar name regName
 
-compileReturn :: Maybe AST.Expression -> IRGenM ()
+compileReturn :: Maybe (AST.Expression Sym) -> IRGenM ()
 compileReturn Nothing = addInstruction $ Ret Nothing
 compileReturn (Just expr) = do
   regName <- compileExpression expr
   addInstruction $ Ret (Just (Register regName))
 
-compileAssignment :: String -> AST.Expression -> IRGenM RegName
+compileAssignment :: Sym -> AST.Expression Sym -> IRGenM RegName
 compileAssignment varName expr = do
   varValue <- lookupVar varName
   case varValue of
@@ -360,9 +363,9 @@ compileAssignment varName expr = do
       regName <- compileExpression expr
       updateVar varName regName
       return regName
-    Nothing -> throwError $ "Variable " ++ varName ++ " not in scope"
+    Nothing -> throwError $ "Variable " ++ show varName ++ " not in scope"
 
-compileExpression :: AST.Expression -> IRGenM RegName
+compileExpression :: AST.Expression Sym -> IRGenM RegName
 compileExpression (AST.NumberLiteral num) = do
   regName <- getNextRegister
   addInstruction $ Set (Register regName) (Immediate num)
@@ -382,7 +385,7 @@ compileExpression (AST.Variable varName) = do
   varValue <- lookupVar varName
   case varValue of
     Just regName -> return regName
-    Nothing -> throwError $ "Variable " ++ varName ++ " not in scope"
+    Nothing -> throwError $ "Variable " ++ show varName ++ " not in scope"
 compileExpression (AST.Ternary cond trueExpr falseExpr) = do
   condReg <- compileExpression cond
   trueLabel <- nextLabel "ternary_true"
