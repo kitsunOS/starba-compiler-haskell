@@ -3,7 +3,6 @@ module IR.IRPhiElim where
 import qualified IR.IR as IR
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-
 type PhiCaptures = Map.Map IR.LabelRef (Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.RegName)))
 
 rewriteModule :: IR.Module -> IR.Module
@@ -16,13 +15,13 @@ captureProcedure (IR.Procedure blocks) = captureBlocks blocks
     captureBlocks :: [IR.Block] -> PhiCaptures
     captureBlocks blocks = Map.unionsWith (Map.unionWith Set.union) (map captureBlock blocks)
     captureBlock :: IR.Block -> PhiCaptures
-    captureBlock (IR.Block label instructions) = Map.singleton label (Map.unionsWith Set.union (map capturePhis instructions))
-    capturePhis :: IR.Instruction -> Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.RegName))
-    capturePhis (IR.Phi destReg args) =
+    captureBlock (IR.Block label instructions) = foldl (capturePhis label) Map.empty instructions
+    capturePhis :: IR.LabelRef -> PhiCaptures -> IR.Instruction -> PhiCaptures
+    capturePhis outerLabel captures (IR.Phi destReg args) =
       foldl (\m (innerLabel, srcReg) ->
-        Map.insertWith Set.union innerLabel (Set.singleton (destReg, srcReg)) m
-      ) Map.empty args
-    capturePhis _ = Map.empty
+        Map.unionWith (Map.unionWith Set.union) m (Map.singleton innerLabel (Map.singleton outerLabel (Set.singleton (destReg, srcReg))))
+      ) captures args
+    capturePhis _ captures _ = captures
 
 rewriteProcedure :: IR.Procedure -> PhiCaptures -> IR.Procedure
 rewriteProcedure (IR.Procedure blocks) captures = IR.Procedure (map (rewriteBlock captures) blocks)
@@ -32,17 +31,16 @@ rewriteProcedure (IR.Procedure blocks) captures = IR.Procedure (map (rewriteBloc
     rewriteInstructions :: PhiCaptures -> IR.LabelRef -> [IR.Instruction] -> [IR.Instruction]
     rewriteInstructions captures label = concatMap (rewriteInstruction captures label)
     rewriteInstruction :: PhiCaptures -> IR.LabelRef -> IR.Instruction -> [IR.Instruction]
-    rewriteInstruction captures innerLabel instruction = case instruction of
+    rewriteInstruction captures outerLabel instruction = let gs = genSets captures outerLabel in case instruction of
       IR.Phi destReg args -> []
-      IR.Jmp outerLabel ->
-          map (\(destReg, srcReg) -> IR.Set (IR.Register destReg) (IR.Register srcReg))
-            (Set.toList (Map.findWithDefault Set.empty innerLabel (Map.findWithDefault Map.empty outerLabel captures)))
-          ++ [IR.Jmp outerLabel]
-      IR.JmpIf cond trueLabel falseLabel ->
-          -- TODO: Could this be smarter and only set when the jump will actually occur?
-          map (\(destReg, srcReg) -> IR.Set (IR.Register destReg) (IR.Register srcReg))
-            (Set.toList (Map.findWithDefault Set.empty innerLabel (Map.findWithDefault Map.empty trueLabel captures)))
-          ++ map (\(destReg, srcReg) -> IR.Set (IR.Register destReg) (IR.Register srcReg))
-            (Set.toList (Map.findWithDefault Set.empty innerLabel (Map.findWithDefault Map.empty falseLabel captures)))
-          ++ [IR.JmpIf cond trueLabel falseLabel]
+      IR.Jmp innerLabel -> gs innerLabel ++ [IR.Jmp innerLabel]
+      IR.JmpIf cond trueLabel falseLabel -> gs trueLabel ++ gs falseLabel ++ [IR.JmpIf cond trueLabel falseLabel]
       _ -> [instruction]
+    genSets :: PhiCaptures -> IR.LabelRef -> IR.LabelRef -> [IR.Instruction]
+    genSets captures outerLabel innerLabel =
+      -- TODO: Don't ignore the inner label
+      case Map.lookup outerLabel captures of
+        Nothing -> []
+        Just innerMap -> foldl (\acc (_, s) -> foldl(
+          \acc2 (destReg, srcReg) -> IR.Set (IR.Register destReg) (IR.Register srcReg):acc2) acc s
+          ) [] $ Map.toList innerMap

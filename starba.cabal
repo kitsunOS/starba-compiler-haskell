@@ -24,7 +24,7 @@ executable starba
     main-is:          Main.hs
     other-modules:    Parser, Lexer, Register, RegAlloc,
                       AST.AST, AST.ASTSymbolRes,
-                      IR.IR, IR.IRGen, IR.IRInstrAnalysis, IR.IRPhiElim,
+                      IR.IR, IR.IRGen, IR.IRInstrAnalysis, IR.IRPhiElim, IR.IRPhiGen,
                       X86.X86Gen, X86.X86Asm, X86.X86Nasm, X86.X86Reg
 
     -- Modules included in this executable, other than Main.
@@ -32,7 +32,7 @@ executable starba
 
     -- LANGUAGE extensions used by modules in this package.
     -- other-extensions:
-    build-depends:    base >= 4.17.2 && < 4.18,
+    build-depends:    base >= 4.17.2 && < 5.0,
                       parsec >= 3.1.16 && < 3.2,
                       containers >= 0.6.4 && < 0.7,
                       mtl >= 2.2.2 && < 2.3,

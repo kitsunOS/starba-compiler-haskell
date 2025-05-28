@@ -5,7 +5,6 @@ import IR.IR (Module(..), Procedure(..), Block(..), Instruction(..), LabelRef(..
 import qualified IR.IR as IR
 import qualified Data.Map as Map
 import qualified RegAlloc
-import qualified Debug.Trace as Debug
 
 newtype GenerationContext = GenerationContext {
   gAllocation :: RegAlloc.Allocation Asm.Register32

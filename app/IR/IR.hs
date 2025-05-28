@@ -1,6 +1,7 @@
 module IR.IR where
 
 import qualified AST.AST as AST
+import qualified Data.Set as Set
 import Data.Map (Map)
 import Data.List (intercalate)
 
@@ -40,13 +41,15 @@ data Value
   | Immediate Integer
   | LabelReference LabelRef
   | SymbolReference String
-  deriving (Eq)
+  | VariableReference VarRef
+  deriving (Eq, Ord)
 
 instance Show Value where
   show (Register reg) = show reg
   show (Immediate i) = show i
   show (LabelReference (LabelRef l)) = l
   show (SymbolReference s) = s
+  show (VariableReference v) = "@" ++ show v
 
 type VarRef = AST.Symbol
 

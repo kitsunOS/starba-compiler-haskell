@@ -10,29 +10,27 @@ import Control.Monad.State
 import Control.Monad.Except
 import qualified Data.Set as Set
 import qualified Data.Foldable
-import GHC.Arr (boundsSTArray)
+import Control.Arrow (ArrowLoop(loop))
 
 -- Data types
 type Sym = AST.Symbol
 
-data IRGenD = IRGen {
+data IRGenD = IRGenD {
   irgBlocks :: [Block],
   irgSymbolTable :: SymbolTable,
   irgNextRegister :: RegName,
   irgNextSymbolName :: String,
-  irgActiveRegisters :: Map.Map VarRef (Map.Map LabelRef RegName),
   irgActiveLabel :: LabelRef,
   irgAllLabels :: Set.Set LabelRef
 }
 type IRGenM = StateT IRGenD (Except String)
 
 defaultState :: IRGenD
-defaultState = IRGen {
+defaultState = IRGenD {
   irgBlocks = [],
   irgSymbolTable = SymbolTable Map.empty Map.empty,
   irgNextRegister = RegName "a" 0,
   irgNextSymbolName = "a",
-  irgActiveRegisters = Map.empty,
   irgActiveLabel = LabelRef "entry",
   irgAllLabels = Set.empty
 }
@@ -77,7 +75,6 @@ addInstructionToBlock instruction (Block label instructions : blocks) activeLabe
 startBlock :: LabelRef -> LabelRef -> IRGenM ()
 startBlock label inheritedLabel = do
   modify $ \s -> s { irgBlocks = Block label [] : irgBlocks s, irgActiveLabel = label }
-  modify $ \s -> s { irgActiveRegisters = inheritVars label (irgActiveRegisters s) inheritedLabel }
   return ()
   where
     inheritVars newLabel activeRegisters inheritedLabel =
@@ -97,25 +94,6 @@ allocateSymbol value = do
           symbolTable' = SymbolTable symbolMap' reverseMap'
       modify $ \s -> s { irgSymbolTable = symbolTable', irgNextSymbolName = incrementName symbolName }
       return symbolName
-
--- Symbol helpers
-lookupSymbol :: Sym -> IRGenM (Maybe RegName)
-lookupSymbol varName = do
-  activeRegisters <- gets irgActiveRegisters
-  let varMap = Map.lookup varName activeRegisters
-  case varMap of
-    Just regMap -> do
-      let regName = Map.lookup (irgActiveLabel defaultState) regMap
-      return regName
-    Nothing -> return Nothing
-
-setSymbol :: Sym -> RegName -> IRGenM ()
-setSymbol varName regName = do
-  activeRegisters <- gets irgActiveRegisters
-  let regMap = Map.insert (irgActiveLabel defaultState) regName (Map.findWithDefault Map.empty varName activeRegisters)
-      newActiveRegisters = Map.insert varName regMap activeRegisters
-  modify $ \s -> s { irgActiveRegisters = newActiveRegisters }
-  return ()
 
 -- Small helpers
 mergeSymbolTables :: [SymbolTable] -> SymbolTable
@@ -226,12 +204,14 @@ compileIfStatement cond trueBranch (Just falseBranch) = do
 compileWhileStatement :: AST.Expression Sym -> AST.Statement Sym -> IRGenM ()
 compileWhileStatement cond body = do
   startLabel <- nextLabel "while_start"
+  loopLabel <- nextLabel "while_loop"
   endLabel <- nextLabel "while_end"
   currentLabel <- gets irgActiveLabel
   addInstruction $ IR.Jmp startLabel
   startBlock startLabel currentLabel
   condReg <- compileExpression cond
-  addInstruction $ IR.JmpIf (Register condReg) endLabel startLabel
+  addInstruction $ IR.JmpIf (Register condReg) loopLabel endLabel
+  startBlock loopLabel currentLabel
   compileStatement body
   addInstruction $ IR.Jmp startLabel
   startBlock endLabel currentLabel
@@ -249,7 +229,7 @@ compileForStatement maybeInit maybeCond maybeStep body = do
   case maybeCond of
     Just cond -> do
       condReg <- compileExpression cond
-      addInstruction $ IR.JmpIf (Register condReg) endLabel startLabel
+      addInstruction $ IR.JmpIf (Register condReg) startLabel endLabel
     Nothing -> return ()
   compileStatement body
   -- TODO: Handle step expression
@@ -263,7 +243,7 @@ compileInnerVarDeclaration :: Sym -> AST.VariableDefinition Sym -> IRGenM ()
 compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
   regName <- compileExpression initializer
-  setSymbol name regName
+  addInstruction $ Set (VariableReference name) (Register regName)
 
 compileReturn :: Maybe (AST.Expression Sym) -> IRGenM ()
 compileReturn Nothing = addInstruction $ Ret Nothing
@@ -273,13 +253,9 @@ compileReturn (Just expr) = do
 
 compileAssignment :: Sym -> AST.Expression Sym -> IRGenM RegName
 compileAssignment varName expr = do
-  varValue <- lookupSymbol varName
-  case varValue of
-    Just reg -> do
-      regName <- compileExpression expr
-      setSymbol varName regName
-      return regName
-    Nothing -> throwError $ "Variable " ++ show varName ++ " not in scope"
+  regName <- compileExpression expr
+  addInstruction $ Set (VariableReference varName) (Register regName)
+  return regName
 
 compileExpression :: AST.Expression Sym -> IRGenM RegName
 compileExpression (AST.NumberLiteral num) = do
@@ -298,10 +274,9 @@ compileExpression (AST.BinOp op left right) = do
   addInstruction $ IR.BinOp (irBinOp op) (Register regName) (Register leftReg) (Register rightReg)
   return regName
 compileExpression (AST.Variable varName) = do
-  varValue <- lookupSymbol varName
-  case varValue of
-    Just regName -> return regName
-    Nothing -> throwError $ "Variable " ++ show varName ++ " not in scope"
+  regName <- getNextRegister
+  addInstruction $ Set (Register regName) (VariableReference varName)
+  return regName
 compileExpression (AST.Ternary cond trueExpr falseExpr) = do
   condReg <- compileExpression cond
   trueLabel <- nextLabel "ternary_true"

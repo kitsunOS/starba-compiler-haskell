@@ -24,6 +24,8 @@ import qualified X86.X86Reg as X86Reg
 import qualified IR.IRPhiElim
 import qualified Data.Map as Map
 import qualified AST.ASTSymbolRes as ASTSymbolRes
+import qualified IR.IRPhiGen
+import qualified IR.IRPhiGen as IRPhiGen
 
 main :: IO ()
 main = do
@@ -49,11 +51,15 @@ run filename outname = do
 
   ir1 <- ExceptT $ pure $ compileModule ast
   liftIO $ print ir1
-  liftIO $ print ""
+  liftIO $ print "(ir1)"
 
-  let ir = IR.IRPhiElim.rewriteModule ir1
+  ir2 <- ExceptT $ pure $ IRPhiGen.phiGen ir1
+  liftIO $ print ir2
+  liftIO $ print "(ir2)"
+
+  let ir = IR.IRPhiElim.rewriteModule ir2
   liftIO $ print ir
-  liftIO $ print ""
+  liftIO $ print "(irFinal)"
 
   let ctx = RegAlloc.RegAllocContext X86Reg.intLive
 

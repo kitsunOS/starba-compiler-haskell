@@ -6,7 +6,6 @@ import qualified Data.Set as Set
 import qualified Register
 import Data.Foldable (maximumBy)
 import Data.Ord (comparing)
-import qualified Debug.Trace as Debug
 
 data BlockUseDefs a = BlockUseDefs {
   uses :: Set.Set (IR.RegEntry a),

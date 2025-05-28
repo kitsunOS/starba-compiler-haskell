@@ -26,6 +26,23 @@ uses (IR.Jmp _) = []
 uses (IR.JmpIf (IR.Register reg) _ _) = [reg]
 uses (IR.JmpIf {}) = []
 
+defsV :: IR.Instruction -> [IR.Value]
+defsV (IR.Ret _) = []
+defsV (IR.Set value _) = [value]
+defsV (IR.BinOp _ value1 _ _) = [value1]
+defsV (IR.Phi value _) = [IR.Register value]
+defsV (IR.Jmp _) = []
+defsV (IR.JmpIf {}) = []
+
+usesV :: IR.Instruction -> [IR.Value]
+usesV (IR.Ret (Just value)) = [value]
+usesV (IR.Ret _) = []
+usesV (IR.Set _ value) = [value]
+usesV (IR.BinOp _ _ value2 value3) = [value2, value3]
+usesV (IR.Phi _ pairs) = map (IR.Register . snd) pairs
+usesV (IR.Jmp _) = []
+usesV (IR.JmpIf value _ _) = [value]
+
 successors :: IR.Instruction -> [IR.LabelRef]
 successors (IR.Jmp label) = [label]
 successors (IR.JmpIf _ trueLabel falseLabel) = [trueLabel, falseLabel]

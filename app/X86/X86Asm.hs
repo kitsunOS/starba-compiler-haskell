@@ -78,13 +78,13 @@ instance Register.Register Register32 where
 
 reg8To32 :: Register8 -> Register32
 reg8To32 AL = EAX
+reg8To32 BL = EBX
 reg8To32 CL = ECX
 reg8To32 DL = EDX
-reg8To32 BL = EBX
 reg8To32 AH = EAX
+reg8To32 BH = EBX
 reg8To32 CH = ECX
 reg8To32 DH = EDX
-reg8To32 BH = EBX
 
 reg32To8 :: Register32 -> Register8
 reg32To8 EAX = AL
