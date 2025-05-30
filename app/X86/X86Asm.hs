@@ -91,4 +91,4 @@ reg32To8 EAX = AL
 reg32To8 EBX = BL
 reg32To8 ECX = CL
 reg32To8 EDX = DL
-reg32To8 _ = error "Invalid 32-bit register for 8-bit conversion"
+reg32To8 x = error $ "Invalid 32-bit register for 8-bit conversion " ++ show x

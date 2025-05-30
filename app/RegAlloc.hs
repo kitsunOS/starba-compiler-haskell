@@ -27,11 +27,13 @@ data Allocation a = Allocation {
   spiltRegisters :: [IR.RegName]
 } deriving (Show, Eq)
 
-newtype RegAllocContext a = RegAllocContext {
-  intLive :: IR.Instruction -> [IR.RegEntry a]
+data RegAllocContext a = RegAllocContext {
+  intLive :: IR.Instruction -> [IR.RegEntry a],
+  racRegCompat :: IR.RegName -> IR.Instruction -> [a]
 }
 
 type InterferenceGraph a = Map.Map IR.RegName (Set.Set (IR.RegEntry a))
+type CompatMap a = Map.Map IR.RegName (Set.Set a)
 
 emptyLiveSets :: LiveSets a
 emptyLiveSets = LiveSets []
@@ -42,14 +44,15 @@ emptyUseDefs = BlockUseDefs Set.empty Set.empty Set.empty
 emptyInOut :: BlockInOut a
 emptyInOut = BlockInOut Set.empty Set.empty
 
-allocateRegisters :: (Ord a, Register.Register a) => RegAllocContext a -> [IR.Block] -> Set.Set a -> Allocation a
+allocateRegisters :: (Ord a, Register.Register a, Show a) => RegAllocContext a -> [IR.Block] -> Allocation a
 allocateRegisters ctx blocks =
   let
+    compatMap' = foldl (\m b -> Map.unionWith Set.union m (compatMap ctx b)) Map.empty blocks
     inOuts = blocksLiveInOut2 blocks
     liveSets' = map (liveSets ctx inOuts) blocks
-    interferences' = foldl (\m (b, l) -> Map.union m (interferences ctx b l)) Map.empty (zip blocks liveSets')
+    interferences' = foldl (\m (b, l) -> Map.unionWith Set.union m (interferences ctx b l)) Map.empty (zip blocks liveSets')
   in
-    colors interferences'
+    colors interferences' compatMap'
 
 blocksLiveInOut2 :: (Ord a, Register.Register a) => [IR.Block] -> Map.Map IR.LabelRef (BlockInOut a)
 blocksLiveInOut2 = blocksLiveInOut . blocksUseDefs
@@ -128,20 +131,33 @@ interferences ctx block liveSets = foldl (collapseMap ctx) Map.empty (zip (IR.bl
         IR.Virtual regName -> Map.insert regName (Set.insert (IR.Physical use) (Map.findWithDefault Set.empty regName m)) m
         IR.Physical _ -> m) map' live
 
-colors :: (Ord a, Register.Register a) => InterferenceGraph a -> Set.Set a -> Allocation a
-colors graph allRegs = colorWithSpills graph allRegs (Allocation Map.empty [])
+compatMap :: (Ord a, Register.Register a) => RegAllocContext a -> IR.Block -> CompatMap a
+compatMap ctx block = foldl (reduceCompat ctx) Map.empty (IR.blockInstructions block)
+  where
+    reduceCompat :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> CompatMap a0 -> IR.Instruction -> CompatMap a0
+    reduceCompat ctx compatMap instr = foldl (\m reg -> reduceReg ctx m reg instr) compatMap (IRIA.uses instr ++ IRIA.defs instr)
+    reduceReg :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> CompatMap a0 -> IR.RegName -> IR.Instruction -> CompatMap a0
+    -- If an entry already exists, intersect with racRegCompat, else, set to racRegCompat
+    reduceReg ctx compatMap reg instr =
+      let compatRegs = Set.fromList (racRegCompat ctx reg instr)
+      in case Map.lookup reg compatMap of
+        Just avail -> Map.insert reg (avail `Set.intersection` compatRegs) compatMap
+        Nothing -> Map.insert reg compatRegs compatMap
 
-colorWithSpills :: (Ord a, Register.Register a) => InterferenceGraph a -> Set.Set a -> Allocation a -> Allocation a
-colorWithSpills graph allRegs alloc = case colorNext graph allRegs alloc of
+colors :: (Ord a, Register.Register a) => InterferenceGraph a -> CompatMap a -> Allocation a
+colors graph compatMap = colorWithSpills graph compatMap (Allocation Map.empty [])
+
+colorWithSpills :: (Ord a, Register.Register a) => InterferenceGraph a -> CompatMap a -> Allocation a -> Allocation a
+colorWithSpills graph compatMap alloc = case colorNext graph compatMap alloc of
   Left _ -> do
     let maxReg = maximumBy (comparing (weightRegName . (graph Map.!))) (Map.keys graph)
     let graph' = graphWithout maxReg graph
     let alloc' = Allocation (allocatedRegisters alloc) (maxReg : spiltRegisters alloc)
-    colorWithSpills graph' allRegs alloc'
+    colorWithSpills graph' compatMap alloc'
   Right alloc' -> alloc'
 
-colorNext :: (Ord a, Register.Register a) => InterferenceGraph a -> Set.Set a -> Allocation a -> Either () (Allocation a)
-colorNext graph allRegs alloc
+colorNext :: (Ord a, Register.Register a) => InterferenceGraph a -> CompatMap a -> Allocation a -> Either () (Allocation a)
+colorNext graph compatMap alloc
   | Map.null graph = Right alloc
   | otherwise = do
     let maxReg = maximumBy (comparing (weightRegName . (graph Map.!))) (Map.keys graph)
@@ -149,12 +165,12 @@ colorNext graph allRegs alloc
     let conflictsPhys = foldl (\s reg -> case reg of
           IR.Virtual regName -> maybe s (`Set.insert` s) (Map.lookup regName (allocatedRegisters alloc))
           IR.Physical reg' -> Set.insert reg' s) Set.empty conflicts
-    let avail = allRegs Set.\\ conflictsPhys
+    let avail = compatMap Map.! maxReg Set.\\ conflictsPhys
     if Set.null avail then Left () else do
       let reg32 = head $ Set.toList avail
       let graph' = Map.delete maxReg graph
       let alloc' = Allocation (Map.insert maxReg reg32 (allocatedRegisters alloc)) (spiltRegisters alloc)
-      colorNext graph' allRegs alloc'
+      colorNext graph' compatMap alloc'
 
 graphWithout :: (Ord a, Register.Register a) => IR.RegName -> InterferenceGraph a -> InterferenceGraph a
 graphWithout reg graph = Map.delete reg $ Map.map (Set.delete (IR.Virtual reg)) graph

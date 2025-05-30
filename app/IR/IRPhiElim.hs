@@ -42,5 +42,7 @@ rewriteProcedure (IR.Procedure blocks) captures = IR.Procedure (map (rewriteBloc
       case Map.lookup outerLabel captures of
         Nothing -> []
         Just innerMap -> foldl (\acc (_, s) -> foldl(
-          \acc2 (destReg, srcReg) -> IR.Set (IR.Register destReg) (IR.Register srcReg):acc2) acc s
+          \acc2 (destReg, srcReg) -> if destReg == srcReg
+            then acc2
+            else IR.Set (IR.Register destReg) (IR.Register srcReg):acc2) acc s
           ) [] $ Map.toList innerMap

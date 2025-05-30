@@ -61,7 +61,7 @@ run filename outname = do
   liftIO $ print ir
   liftIO $ print "(irFinal)"
 
-  let ctx = RegAlloc.RegAllocContext X86Reg.intLive
+  let ctx = RegAlloc.RegAllocContext X86Reg.intLive X86Reg.regCompat
 
   let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
       allInOut = RegAlloc.blocksLiveInOut2 (irBlocks ir)
@@ -72,11 +72,15 @@ run filename outname = do
   liftIO $ print liveness
   liftIO $ print ""
 
-  let interferences = RegAlloc.interferences ctx (head $ irBlocks ir) (head liveness)
+  let interferences = foldl (\m (b, l) -> Map.unionWith Set.union m (RegAlloc.interferences ctx b l)) Map.empty (zip (irBlocks ir) liveness)
   liftIO $ print interferences
   liftIO $ print ""
 
-  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir) (Set.fromList [X86Asm.EAX, X86Asm.EBX, X86Asm.ECX, X86Asm.EDX, X86Asm.ESI, X86Asm.EDI])
+  let compatMap = foldl (\m b -> Map.unionWith Set.union m (RegAlloc.compatMap ctx b)) Map.empty (irBlocks ir)
+  liftIO $ print compatMap
+  liftIO $ print ""
+
+  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir)
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 
