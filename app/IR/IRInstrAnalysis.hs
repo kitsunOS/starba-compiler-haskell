@@ -39,7 +39,7 @@ usesV (IR.Ret (Just value)) = [value]
 usesV (IR.Ret _) = []
 usesV (IR.Set _ value) = [value]
 usesV (IR.BinOp _ _ value2 value3) = [value2, value3]
-usesV (IR.Phi _ pairs) = map (IR.Register . snd) pairs
+usesV (IR.Phi _ pairs) = map snd pairs
 usesV (IR.Jmp _) = []
 usesV (IR.JmpIf value _ _) = [value]
 

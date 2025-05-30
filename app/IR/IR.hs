@@ -68,7 +68,7 @@ data Instruction
   | BinOp BinOpType Value Value Value
   | Jmp LabelRef
   | JmpIf Value LabelRef LabelRef
-  | Phi RegName [(LabelRef, RegName)]
+  | Phi RegName [(LabelRef, Value)]
   deriving (Eq)
 
 instance Show Instruction where

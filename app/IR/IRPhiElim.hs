@@ -3,7 +3,7 @@ module IR.IRPhiElim where
 import qualified IR.IR as IR
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-type PhiCaptures = Map.Map IR.LabelRef (Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.RegName)))
+type PhiCaptures = Map.Map IR.LabelRef (Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.Value)))
 
 rewriteModule :: IR.Module -> IR.Module
 rewriteModule (IR.Module procedures fieldTable symbolTable) =
@@ -18,8 +18,8 @@ captureProcedure (IR.Procedure blocks) = captureBlocks blocks
     captureBlock (IR.Block label instructions) = foldl (capturePhis label) Map.empty instructions
     capturePhis :: IR.LabelRef -> PhiCaptures -> IR.Instruction -> PhiCaptures
     capturePhis outerLabel captures (IR.Phi destReg args) =
-      foldl (\m (innerLabel, srcReg) ->
-        Map.unionWith (Map.unionWith Set.union) m (Map.singleton innerLabel (Map.singleton outerLabel (Set.singleton (destReg, srcReg))))
+      foldl (\m (innerLabel, srcVal) ->
+        Map.unionWith (Map.unionWith Set.union) m (Map.singleton innerLabel (Map.singleton outerLabel (Set.singleton (destReg, srcVal))))
       ) captures args
     capturePhis _ captures _ = captures
 
@@ -42,7 +42,7 @@ rewriteProcedure (IR.Procedure blocks) captures = IR.Procedure (map (rewriteBloc
       case Map.lookup outerLabel captures of
         Nothing -> []
         Just innerMap -> foldl (\acc (_, s) -> foldl(
-          \acc2 (destReg, srcReg) -> if destReg == srcReg
+          \acc2 (destReg, srcVal) -> if IR.Register destReg == srcVal
             then acc2
-            else IR.Set (IR.Register destReg) (IR.Register srcReg):acc2) acc s
+            else IR.Set (IR.Register destReg) srcVal:acc2) acc s
           ) [] $ Map.toList innerMap

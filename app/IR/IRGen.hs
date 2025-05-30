@@ -177,22 +177,22 @@ compileStatement (AST.BlockBody stmts) = mapM_ compileStatement stmts
 
 compileIfStatement :: AST.Expression Sym -> AST.Statement Sym -> Maybe (AST.Statement Sym) -> IRGenM ()
 compileIfStatement cond trueBranch Nothing = do
-  condReg <- compileExpression cond
+  condVal <- compileExpression cond
   trueLabel <- nextLabel "if_true"
   endLabel <- nextLabel "if_end"
   currentLabel <- gets irgActiveLabel
-  addInstruction $ IR.JmpIf (Register condReg) trueLabel endLabel
+  addInstruction $ IR.JmpIf condVal trueLabel endLabel
   startBlock trueLabel currentLabel
   compileStatement trueBranch
   addInstruction $ IR.Jmp endLabel
   startBlock endLabel currentLabel
 compileIfStatement cond trueBranch (Just falseBranch) = do
-  condReg <- compileExpression cond
+  condVal <- compileExpression cond
   trueLabel <- nextLabel "if_true"
   falseLabel <- nextLabel "if_false"
   endLabel <- nextLabel "if_end"
   currentLabel <- gets irgActiveLabel
-  addInstruction $ IR.JmpIf (Register condReg) trueLabel falseLabel
+  addInstruction $ IR.JmpIf condVal trueLabel falseLabel
   startBlock trueLabel currentLabel
   compileStatement trueBranch
   addInstruction $ IR.Jmp endLabel
@@ -209,8 +209,8 @@ compileWhileStatement cond body = do
   currentLabel <- gets irgActiveLabel
   addInstruction $ IR.Jmp startLabel
   startBlock startLabel currentLabel
-  condReg <- compileExpression cond
-  addInstruction $ IR.JmpIf (Register condReg) loopLabel endLabel
+  condVal <- compileExpression cond
+  addInstruction $ IR.JmpIf condVal loopLabel endLabel
   startBlock loopLabel currentLabel
   compileStatement body
   addInstruction $ IR.Jmp startLabel
@@ -228,8 +228,8 @@ compileForStatement maybeInit maybeCond maybeStep body = do
     Nothing -> return ()
   case maybeCond of
     Just cond -> do
-      condReg <- compileExpression cond
-      addInstruction $ IR.JmpIf (Register condReg) startLabel endLabel
+      condVal <- compileExpression cond
+      addInstruction $ IR.JmpIf condVal startLabel endLabel
     Nothing -> return ()
   compileStatement body
   -- TODO: Handle step expression
@@ -242,58 +242,50 @@ compileInnerDeclaration (AST.InnerDeclaration name (AST.InnerVarDeclarationValue
 compileInnerVarDeclaration :: Sym -> AST.VariableDefinition Sym -> IRGenM ()
 compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
-  regName <- compileExpression initializer
-  addInstruction $ Set (VariableReference name) (Register regName)
+  val <- compileExpression initializer
+  addInstruction $ Set (VariableReference name) val
 
 compileReturn :: Maybe (AST.Expression Sym) -> IRGenM ()
 compileReturn Nothing = addInstruction $ Ret Nothing
 compileReturn (Just expr) = do
-  regName <- compileExpression expr
-  addInstruction $ Ret (Just (Register regName))
+  val <- compileExpression expr
+  addInstruction $ Ret (Just val)
 
-compileAssignment :: Sym -> AST.Expression Sym -> IRGenM RegName
+compileAssignment :: Sym -> AST.Expression Sym -> IRGenM IR.Value
 compileAssignment varName expr = do
-  regName <- compileExpression expr
-  addInstruction $ Set (VariableReference varName) (Register regName)
-  return regName
+  val <- compileExpression expr
+  addInstruction $ Set (VariableReference varName) val
+  return val
 
-compileExpression :: AST.Expression Sym -> IRGenM RegName
-compileExpression (AST.NumberLiteral num) = do
-  regName <- getNextRegister
-  addInstruction $ Set (Register regName) (Immediate num)
-  return regName
+compileExpression :: AST.Expression Sym -> IRGenM Value
+compileExpression (AST.NumberLiteral num) = return $ IR.Immediate num
 compileExpression (AST.StringLiteral str) = do
   symbolName <- allocateSymbol str
-  regName <- getNextRegister
-  addInstruction $ Set (Register regName) (SymbolReference symbolName)
-  return regName
+  return $ SymbolReference symbolName
 compileExpression (AST.BinOp op left right) = do
-  leftReg <- compileExpression left
-  rightReg <- compileExpression right
+  leftVal <- compileExpression left
+  rightVal <- compileExpression right
   regName <- getNextRegister
-  addInstruction $ IR.BinOp (irBinOp op) (Register regName) (Register leftReg) (Register rightReg)
-  return regName
-compileExpression (AST.Variable varName) = do
-  regName <- getNextRegister
-  addInstruction $ Set (Register regName) (VariableReference varName)
-  return regName
+  addInstruction $ IR.BinOp (irBinOp op) (Register regName) leftVal rightVal
+  return $ IR.Register regName
+compileExpression (AST.Variable varName) = return $ IR.VariableReference varName
 compileExpression (AST.Ternary cond trueExpr falseExpr) = do
-  condReg <- compileExpression cond
+  condVal <- compileExpression cond
   trueLabel <- nextLabel "ternary_true"
   falseLabel <- nextLabel "ternary_false"
   endLabel <- nextLabel "ternary_end"
   currentLabel <- gets irgActiveLabel
-  addInstruction $ IR.JmpIf (Register condReg) trueLabel falseLabel
+  addInstruction $ IR.JmpIf condVal trueLabel falseLabel
   startBlock trueLabel currentLabel
-  trueReg <- compileExpression trueExpr
+  trueVal <- compileExpression trueExpr
   addInstruction $ IR.Jmp endLabel
   startBlock falseLabel currentLabel
-  falseReg <- compileExpression falseExpr
+  falseVal <- compileExpression falseExpr
   addInstruction $ IR.Jmp endLabel
   startBlock endLabel currentLabel
   outReg <- getNextRegister
-  addInstruction $ IR.Phi outReg [(trueLabel, trueReg), (falseLabel, falseReg)]
-  return outReg
+  addInstruction $ IR.Phi outReg [(trueLabel, trueVal), (falseLabel, falseVal)]
+  return $ IR.Register outReg
 compileExpression (AST.AssignExpr var expr) = compileAssignment var expr
 
 

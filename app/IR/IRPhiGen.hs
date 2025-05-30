@@ -156,46 +156,46 @@ rewriteBlock block = do
             return $ Phi mainVar ops) (Map.toList bRegSources)
         Nothing -> return []
 
-    generatePhiOperands :: IR.Value -> Set.Set LabelRef -> OrderedBlock -> PhiGenM [(LabelRef, RegName)]
+    generatePhiOperands :: IR.Value -> Set.Set LabelRef -> OrderedBlock -> PhiGenM [(LabelRef, IR.Value)]
     generatePhiOperands regName sourceLabels block = do
       sourceBlocks <- gets pgSourceBlocks
       mapM (\label -> do
         let sourceBlock = sourceBlocks Map.! label
-        remappedReg <- mappedRegister regName sourceBlock
-        return (label, remappedReg)) (Set.toList sourceLabels)
+        remappedVal <- remapValue regName sourceBlock
+        return (label, remappedVal)) (Set.toList sourceLabels)
 
     rewriteInstruction :: OrderedBlock -> Instruction -> PhiGenM Instruction
     rewriteInstruction block (IR.Ret Nothing) = return $ IR.Ret Nothing
     rewriteInstruction block (IR.Ret (Just value)) = do
-      remappedValue <- remapValue block value
+      remappedValue <- remapValue value block
       return $ IR.Ret (Just remappedValue)
     rewriteInstruction block (IR.Set dest src) = do
-      remappedDest <- remapValue block dest
-      remappedSrc <- remapValue block src
+      remappedDest <- remapValue dest block
+      remappedSrc <- remapValue src block
       return $ IR.Set remappedDest remappedSrc
     rewriteInstruction block (IR.BinOp op dest src1 src2) = do
-      remappedDest <- remapValue block dest
-      remappedSrc1 <- remapValue block src1
-      remappedSrc2 <- remapValue block src2
+      remappedDest <- remapValue dest block
+      remappedSrc1 <- remapValue src1 block
+      remappedSrc2 <- remapValue src2 block
       return $ IR.BinOp op remappedDest remappedSrc1 remappedSrc2
     rewriteInstruction block (IR.Jmp label) = return $ IR.Jmp label
     rewriteInstruction block (IR.JmpIf cond label1 label2) = do
-      remappedCond <- remapValue block cond
+      remappedCond <- remapValue cond block
       return $ IR.JmpIf remappedCond label1 label2
     rewriteInstruction block (Phi regName operands) = do
-      remappedOperands <- mapM (\(label, reg) -> do
-        remappedReg <- mappedRegister (IR.Register reg) block
+      remappedOperands <- mapM (\(label, val) -> do
+        remappedReg <- remapValue val block
         return (label, remappedReg)) operands
       return $ Phi regName remappedOperands
 
-    remapValue :: OrderedBlock -> IR.Value -> PhiGenM IR.Value
-    remapValue block (IR.Register regName) = do
+    remapValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
+    remapValue (IR.Register regName) block = do
       remappedReg <- mappedRegister (IR.Register regName) block
       return $ IR.Register remappedReg
-    remapValue block (IR.VariableReference varRef) = do
+    remapValue (IR.VariableReference varRef) block = do
       remappedVar <- mappedRegister (IR.VariableReference varRef) block
       return $ IR.Register remappedVar
-    remapValue _ a = return a
+    remapValue a _ = return a
 
 rewriteBlocks :: [OrderedBlock] -> PhiGenM [Block]
 rewriteBlocks blocks = do
