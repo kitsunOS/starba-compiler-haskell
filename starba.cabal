@@ -25,6 +25,7 @@ executable starba
     other-modules:    Parser, Lexer, Register, RegAlloc,
                       AST.AST, AST.ASTSymbolRes,
                       IR.IR, IR.IRGen, IR.IRInstrAnalysis, IR.IRPhiElim, IR.IRPhiGen,
+                      IR.IRConstProp,
                       X86.X86Gen, X86.X86Asm, X86.X86Nasm, X86.X86Reg
 
     -- Modules included in this executable, other than Main.

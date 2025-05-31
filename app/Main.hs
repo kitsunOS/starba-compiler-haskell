@@ -26,6 +26,7 @@ import qualified Data.Map as Map
 import qualified AST.ASTSymbolRes as ASTSymbolRes
 import qualified IR.IRPhiGen
 import qualified IR.IRPhiGen as IRPhiGen
+import qualified IR.IRConstProp as IRConstProp
 
 main :: IO ()
 main = do
@@ -49,43 +50,47 @@ run filename outname = do
   liftIO $ print ast
   liftIO $ print ""
 
-  ir1 <- ExceptT $ pure $ compileModule ast
-  liftIO $ print ir1
-  liftIO $ print "(ir1)"
+  irLowered <- ExceptT $ pure $ compileModule ast
+  liftIO $ print irLowered
+  liftIO $ print "(irLowered)"
 
-  ir2 <- ExceptT $ pure $ IRPhiGen.phiGen ir1
-  liftIO $ print ir2
-  liftIO $ print "(ir2)"
+  irPhi <- ExceptT $ pure $ IRPhiGen.phiGen irLowered
+  liftIO $ print irPhi
+  liftIO $ print "(irPhi)"
 
-  let ir = IR.IRPhiElim.rewriteModule ir2
-  liftIO $ print ir
+  let irConstProp = IRConstProp.propogateConstants irPhi
+  liftIO $ print irConstProp
+  liftIO $ print "(irConstProp)"
+
+  let irFinal = IR.IRPhiElim.rewriteModule irConstProp
+  liftIO $ print irFinal
   liftIO $ print "(irFinal)"
 
   let ctx = RegAlloc.RegAllocContext X86Reg.intLive X86Reg.regCompat
 
   let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
-      allInOut = RegAlloc.blocksLiveInOut2 (irBlocks ir)
+      allInOut = RegAlloc.blocksLiveInOut2 (irBlocks irFinal)
   liftIO $ putStrLn (showAll allInOut)
 
   let liveness :: [RegAlloc.LiveSets X86Asm.Register32]
-      liveness = map (RegAlloc.liveSets ctx allInOut) (irBlocks ir)
+      liveness = map (RegAlloc.liveSets ctx allInOut) (irBlocks irFinal)
   liftIO $ print liveness
   liftIO $ print ""
 
-  let interferences = foldl (\m (b, l) -> Map.unionWith Set.union m (RegAlloc.interferences ctx b l)) Map.empty (zip (irBlocks ir) liveness)
+  let interferences = foldl (\m (b, l) -> Map.unionWith Set.union m (RegAlloc.interferences ctx b l)) Map.empty (zip (irBlocks irFinal) liveness)
   liftIO $ print interferences
   liftIO $ print ""
 
-  let compatMap = foldl (\m b -> Map.unionWith Set.union m (RegAlloc.compatMap ctx b)) Map.empty (irBlocks ir)
+  let compatMap = foldl (\m b -> Map.unionWith Set.union m (RegAlloc.compatMap ctx b)) Map.empty (irBlocks irFinal)
   liftIO $ print compatMap
   liftIO $ print ""
 
-  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks ir)
+  let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks irFinal)
   liftIO $ print allocatedRegisters
   liftIO $ print ""
 
   let generationContext = X86Gen.GenerationContext allocatedRegisters
-  x86 <- ExceptT $ pure $ X86Gen.generateAsm generationContext ir
+  x86 <- ExceptT $ pure $ X86Gen.generateAsm generationContext irFinal
 
   let nasmStr = X86Nasm.toNasmStr x86
 

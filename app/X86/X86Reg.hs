@@ -1,4 +1,4 @@
-module X86.X86Reg where
+module X86.X86Reg (intLive, regCompat) where
 
 import qualified X86.X86Asm as Asm
 import qualified IR.IR as IR
