@@ -39,6 +39,7 @@ instrToNasm (Setle reg) = "setle " ++ registerToNasm8 reg
 instrToNasm (Setg reg) = "setg " ++ registerToNasm8 reg
 instrToNasm (Setge reg) = "setge " ++ registerToNasm8 reg
 instrToNasm (Movzx dest src) = "movzx " ++ registerToNasm dest ++ ", " ++ registerToNasm8 src
+instrToNasm (Neg reg) = "neg " ++ registerToNasm reg
 instrToNasm Ret = "ret"
 
 operandToNasm :: Operand -> String

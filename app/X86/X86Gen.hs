@@ -77,10 +77,12 @@ generateInstructions ctx (BinOp IR.Sub dest src1 src2)
   | rDest == rSrc1 = [
     Asm.Sub rDest rSrc2]
   | rDest == rSrc2 = [
-    Asm.Sub rDest rSrc1]
+    Asm.Sub rDest rSrc1,
+    Asm.Neg $ requireReg32 rDest
+    ]
   | otherwise = [
-    Asm.Mov rDest rSrc2,
-    Asm.Sub rDest rSrc1]
+    Asm.Mov rDest rSrc1,
+    Asm.Sub rDest rSrc2]
   where
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1

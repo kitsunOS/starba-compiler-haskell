@@ -26,6 +26,8 @@ data PhiGenD = PhiGenD {
 
 type PhiGenM = StateT PhiGenD (Except String)
 
+type PhiOuts = Map.Map IR.Value IR.RegName
+
 blankOrderedBlock :: Block -> OrderedBlock
 blankOrderedBlock block = OrderedBlock {
   obBlock = block,
@@ -147,16 +149,15 @@ mappedRegister regName block = do
   modify $ \s -> s { pgActiveRemaps = activeRemaps' }
   return mapping
 
-rewriteBlock :: OrderedBlock -> PhiGenM Block
+rewriteBlock :: OrderedBlock -> PhiGenM (Block, PhiOuts)
 rewriteBlock block = do
   let blockLabel' = blockLabel (obBlock block)
   phiOuts <- generatePhiOuts block
   newInstructions <- mapM (rewriteInstruction block) (blockInstructions (obBlock block))
-  newHeader <- generatePhis block phiOuts
-  return $ Block { blockLabel = blockLabel', blockInstructions = newHeader ++ newInstructions }
+  return (Block { blockLabel = blockLabel', blockInstructions = newInstructions }, phiOuts)
 
   where
-    generatePhiOuts :: OrderedBlock -> PhiGenM (Map.Map IR.Value IR.RegName)
+    generatePhiOuts :: OrderedBlock -> PhiGenM PhiOuts
     generatePhiOuts block = do
       regSources <- gets pgRegSources
       let blockLabel' = blockLabel (obBlock block)
@@ -166,36 +167,6 @@ rewriteBlock block = do
             return (k, mainVar)) (Map.toList bRegSources)
           return $ Map.fromList allMainVars
         Nothing -> return Map.empty
-
-    generatePhis :: OrderedBlock -> Map.Map IR.Value IR.RegName -> PhiGenM [Instruction]
-    generatePhis block phiOuts = do
-      regSources <- gets pgRegSources
-      let blockLabel' = blockLabel (obBlock block)
-      case Map.lookup blockLabel' regSources of
-        Just bRegSources -> do
-          mapM (\(k, v) -> generatePhiOperands k v block >>= \ops ->
-            case Map.lookup k phiOuts of
-              Just mainVar -> return $ Phi mainVar ops
-              Nothing -> throwError $ "No main variable found for " ++ show k) (Map.toList bRegSources)
-        Nothing -> return []
-    {-generatePhis :: OrderedBlock -> PhiGenM [Instruction]
-    generatePhis block = do
-      regSources <- gets pgRegSources
-      let blockLabel' = blockLabel (obBlock block)
-      case Map.lookup blockLabel' regSources of
-        Just bRegSources -> do
-          mapM (\(k, v) -> generatePhiOperands k v block >>= \ops ->
-            mappedRegister k block >>= \mainVar ->
-            return $ Phi mainVar ops) (Map.toList bRegSources)
-        Nothing -> return []-}
-
-    generatePhiOperands :: IR.Value -> Set.Set LabelRef -> OrderedBlock -> PhiGenM [(LabelRef, IR.Value)]
-    generatePhiOperands regName sourceLabels block = do
-      sourceBlocks <- gets pgSourceBlocks
-      mapM (\label -> do
-        let sourceBlock = sourceBlocks Map.! label
-        remappedVal <- mappedValue regName sourceBlock
-        return (label, remappedVal)) (Set.toList sourceLabels)
 
     rewriteInstruction :: OrderedBlock -> Instruction -> PhiGenM Instruction
     rewriteInstruction block (IR.Ret Nothing) = return $ IR.Ret Nothing
@@ -221,23 +192,50 @@ rewriteBlock block = do
         return (label, remappedReg)) operands
       return $ Phi regName remappedOperands
 
-    remapValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
-    remapValue (IR.Register regName) block = do
-      remappedReg <- remapRegister (IR.Register regName) block
-      return $ IR.Register remappedReg
-    remapValue (IR.VariableReference varRef) block = do
-      remappedVar <- remapRegister (IR.VariableReference varRef) block
-      return $ IR.Register remappedVar
-    remapValue a _ = return a
+prependPhiOuts :: Block -> PhiOuts -> PhiGenM Block
+prependPhiOuts block phiOuts = do
+  newHeader <- generatePhis block phiOuts
+  let newInstructions = blockInstructions block
+  return $ block { blockInstructions = newHeader ++ newInstructions }
 
-    mappedValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
-    mappedValue (IR.Register regName) block = do
-      remappedReg <- mappedRegister (IR.Register regName) block
-      return $ IR.Register remappedReg
-    mappedValue (IR.VariableReference varRef) block = do
-      remappedVar <- mappedRegister (IR.VariableReference varRef) block
-      return $ IR.Register remappedVar
-    mappedValue a _ = return a
+  where
+    generatePhis :: Block -> PhiOuts -> PhiGenM [Instruction]
+    generatePhis block phiOuts = do
+      regSources <- gets pgRegSources
+      let blockLabel' = blockLabel block
+      case Map.lookup blockLabel' regSources of
+        Just bRegSources -> do
+          mapM (\(k, v) -> generatePhiOperands k v >>= \ops ->
+            case Map.lookup k phiOuts of
+              Just mainVar -> return $ Phi mainVar ops
+              Nothing -> throwError $ "No main variable found for " ++ show k) (Map.toList bRegSources)
+        Nothing -> return []
+
+    generatePhiOperands :: IR.Value -> Set.Set LabelRef -> PhiGenM [(LabelRef, IR.Value)]
+    generatePhiOperands regName sourceLabels = do
+      sourceBlocks <- gets pgSourceBlocks
+      mapM (\label -> do
+        let sourceBlock = sourceBlocks Map.! label
+        remappedVal <- mappedValue regName sourceBlock
+        return (label, remappedVal)) (Set.toList sourceLabels)
+
+remapValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
+remapValue (IR.Register regName) block = do
+  remappedReg <- remapRegister (IR.Register regName) block
+  return $ IR.Register remappedReg
+remapValue (IR.VariableReference varRef) block = do
+  remappedVar <- remapRegister (IR.VariableReference varRef) block
+  return $ IR.Register remappedVar
+remapValue a _ = return a
+
+mappedValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
+mappedValue (IR.Register regName) block = do
+  remappedReg <- mappedRegister (IR.Register regName) block
+  return $ IR.Register remappedReg
+mappedValue (IR.VariableReference varRef) block = do
+  remappedVar <- mappedRegister (IR.VariableReference varRef) block
+  return $ IR.Register remappedVar
+mappedValue a _ = return a
 
 rewriteBlocks :: [OrderedBlock] -> PhiGenM [Block]
 rewriteBlocks blocks = do
@@ -245,7 +243,8 @@ rewriteBlocks blocks = do
   sourceBlocks <- gets pgSourceBlocks
   let blocksMap = Map.fromList [(blockLabel (obBlock b), b) | b <- blocks]
   modify $ \s -> s { pgRegSources = regSources, pgSourceBlocks = sourceBlocks }
-  mapM rewriteBlock blocks
+  blocksAndPhiOuts <- mapM rewriteBlock blocks
+  mapM (uncurry prependPhiOuts) blocksAndPhiOuts
 
 phiGenBlocks :: [Block] -> Except String [Block]
 phiGenBlocks blocks = do

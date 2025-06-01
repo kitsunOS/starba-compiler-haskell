@@ -35,6 +35,7 @@ data Instr
   | Setg Register8
   | Setge Register8
   | Movzx Register32 Register8
+  | Neg Register32
   | Ret
   deriving (Show, Eq)
 
@@ -63,7 +64,7 @@ instance Register.Register Register8 where
   formatName DH = "dh"
   formatName BH = "bh"
 
-data Register32 = EAX | EBX | ECX | EDX | ESP | EBP | ESI | EDI
+data Register32 = ESP | EBP | ESI | EDI | EAX | EBX | ECX | EDX
   deriving (Show, Eq, Ord)
 
 instance Register.Register Register32 where

@@ -26,7 +26,7 @@ import qualified Data.Map as Map
 import qualified AST.ASTSymbolRes as ASTSymbolRes
 import qualified IR.IRPhiGen
 import qualified IR.IRPhiGen as IRPhiGen
-import qualified IR.IRConstProp as IRConstProp
+import qualified IR.IRValueProp as IRValueProp
 
 main :: IO ()
 main = do
@@ -58,11 +58,11 @@ run filename outname = do
   liftIO $ print irPhi
   liftIO $ print "(irPhi)"
 
-  let irConstProp = IRConstProp.propogateConstants irPhi
-  liftIO $ print irConstProp
-  liftIO $ print "(irConstProp)"
+  let irValueProp = IRValueProp.propogateValues irPhi
+  liftIO $ print irValueProp
+  liftIO $ print "(irValueProp)"
 
-  let irFinal = IR.IRPhiElim.rewriteModule irConstProp
+  let irFinal = IR.IRPhiElim.rewriteModule irValueProp
   liftIO $ print irFinal
   liftIO $ print "(irFinal)"
 
