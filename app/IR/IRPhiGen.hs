@@ -1,275 +1,180 @@
 module IR.IRPhiGen (phiGen) where
 
-import IR.IR (Block (blockInstructions, blockLabel, Block), LabelRef (LabelRef), Instruction (Jmp, JmpIf, Phi), RegName (RegName))
-import IR.IRInstrAnalysis (usesV, defsV, successors)
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Control.Monad.Except (Except, runExcept, MonadError (throwError))
-import Control.Monad.State (StateT (runStateT), gets, modify)
+import Control.Monad.State (StateT (runStateT), gets, modify, mapStateT, evalStateT)
 import qualified IR.IR as IR
+import qualified IR.IRCfgAnalysis as IRCA
+import qualified IR.IRInstrAnalysis as IRIA
+-- TODO: Break dependency on AST
+import qualified AST.AST as AST
 
-data OrderedBlock = OrderedBlock {
-  obBlock :: Block,
-  obSuccessors :: Set.Set LabelRef,
-  obRequestedVars :: Set.Set IR.Value,
-  obDefinedVars :: Set.Set IR.Value
+type ValueRemaps = Map.Map IR.Value IR.Value;
+
+-- TODO: Optimize when phis are generated
+-- For right now, rely on IRValueProp to do that...
+
+data PGBlock = PGBlock {
+  pgbCFGBlock :: IRCA.CFGBlock,
+  pgbInOut :: IRCA.BlockInOut IR.Value,
+  pgbValueRemaps :: ValueRemaps,
+  pgbPhiSourceNames :: Map.Map IR.RegName IR.VarRef
 } deriving (Show, Eq)
 
-type RegSources = Map.Map LabelRef (Map.Map IR.Value (Set.Set LabelRef))
-
 data PhiGenD = PhiGenD {
-  pgNextRegister :: RegName,
-  pgActiveRemaps :: Map.Map IR.Value (Map.Map LabelRef RegName),
-  pgRegSources :: RegSources,
-  pgSourceBlocks :: Map.Map LabelRef OrderedBlock
+  pgLastRegisterVer :: Map.Map IR.Value Int,
+  pgSourceBlocks :: Map.Map IR.LabelRef PGBlock,
+  pgActiveBlock :: PGBlock
 }
 
 type PhiGenM = StateT PhiGenD (Except String)
 
-type PhiOuts = Map.Map IR.Value IR.RegName
+activeBlockLabel :: PhiGenM IR.LabelRef
+activeBlockLabel = gets $ IR.blockLabel . IRCA.obBlock . pgbCFGBlock . pgActiveBlock
 
-blankOrderedBlock :: Block -> OrderedBlock
-blankOrderedBlock block = OrderedBlock {
-  obBlock = block,
-  obSuccessors = Set.empty,
-  obRequestedVars = Set.empty,
-  obDefinedVars = Set.empty
-}
+-- TODO: Ensure it does not conflict with existing registers
+newMapping :: IR.Value -> PhiGenM IR.Value
+newMapping (IR.VariableReference (AST.Symbol name version)) = do
+  let oldValue = IR.VariableReference $ AST.Symbol name version
+  newRegisterVer <- gets (\s -> case Map.lookup oldValue (pgLastRegisterVer s) of
+    Just v -> v + 1
+    Nothing -> 0)
+  let newValue = IR.Register $ IR.RegName ("_"++ name ++ "_"  ++ show version) newRegisterVer
+  modify (\s -> s {
+    pgLastRegisterVer = Map.insert oldValue newRegisterVer $ pgLastRegisterVer s,
+    pgActiveBlock = (pgActiveBlock s) {
+      pgbValueRemaps = Map.insert oldValue newValue ((pgbValueRemaps . pgActiveBlock) s)
+    }
+  })
+  return newValue
 
-orderBlocks :: [Block] -> [OrderedBlock]
-orderBlocks = map (\b -> (blankOrderedBlock b) { obSuccessors = Set.fromList (allInstructionSuccessors b) })
-  where
-    allInstructionSuccessors :: Block -> [LabelRef]
-    allInstructionSuccessors block = concatMap successors (blockInstructions block)
+newMapping v = pure v
 
-usedRegs :: Block -> (Set.Set IR.Value, Set.Set IR.Value)
-usedRegs block = foldl usedRegs' (Set.empty, Set.empty) (reverse (blockInstructions block))
-  where
-    usedRegs' :: (Set.Set IR.Value, Set.Set IR.Value) -> Instruction -> (Set.Set IR.Value, Set.Set IR.Value)
-    usedRegs' (usedAcc, defAcc) inst =
-      let used = Set.fromList (usesV inst)
-          defs = Set.fromList (defsV inst)
-      in (Set.difference (Set.union usedAcc used) defs, Set.union defAcc defs)
-
-determineRegSources :: [OrderedBlock] -> RegSources
-determineRegSources blocks =
-  let blocks' = map blockReqDef blocks
-  in mergeRegSources $ map (determineRegSources' $ blocksMap blocks') blocks'
-  where
-    determineRegSources' :: Map.Map LabelRef OrderedBlock -> OrderedBlock -> RegSources
-    determineRegSources' blocks block = foldl
-      (\acc regName -> propogateRegSource blocks block regName (blockLabel $ obBlock block) Set.empty acc)
-      Map.empty (Set.toList (obDefinedVars block))
-
-    blockReqDef :: OrderedBlock -> OrderedBlock
-    blockReqDef block =
-      let (used, defs) = usedRegs (obBlock block)
-      in block { obRequestedVars = used, obDefinedVars = defs }
-
-    blocksMap :: [OrderedBlock] -> Map.Map LabelRef OrderedBlock
-    blocksMap blocks = Map.fromList [(blockLabel (obBlock block), block) | block <- blocks]
-
-    propogateRegSource :: Map.Map LabelRef OrderedBlock -> OrderedBlock -> IR.Value -> LabelRef -> Set.Set LabelRef -> RegSources -> RegSources
-    propogateRegSource blocks block regName source visited sources =
-      let blockLabel' = blockLabel (obBlock block)
-          visited' = Set.insert blockLabel' visited
-          hasReg = Set.member regName (obRequestedVars block)
-          sources' = if hasReg
-            then Map.insertWith (Map.unionWith Set.union) blockLabel' (Map.singleton regName (Set.singleton source)) sources
-            else sources
-          hasDef = Set.member regName (obDefinedVars block)
-      in if hasDef && blockLabel' /= source
-        then sources'
-        else foldl (\acc nextBlockLabel ->
-          if Set.member blockLabel' visited
-          then acc
-          else propogateRegSource blocks (blocks Map.! nextBlockLabel) regName source visited' acc
-        ) sources' (Set.toList (obSuccessors block))
-
-    mergeRegSources :: [RegSources] -> RegSources
-    mergeRegSources = foldl (Map.unionWith (Map.unionWith Set.union)) Map.empty
-
-getNextRegister :: PhiGenM RegName
-getNextRegister = do
-  regName <- gets pgNextRegister
-  modify $ \s -> s { pgNextRegister = nextRegName regName }
-  return regName
-
--- TODO: Deduplicate logic
-nextRegName :: RegName -> RegName
-nextRegName (RegName prefix num) =
-  RegName (incrementName prefix) 0
-
-incrementName :: String -> String
-incrementName = reverse . increment . reverse
-  where
-    increment [] = ['a']
-    increment ('z':xs) = 'a' : increment xs
-    increment (x:xs) = succ x : xs
-
-remapRegisterName :: IR.Value -> OrderedBlock -> PhiGenM RegName
-remapRegisterName regName block = do
-  regSources <- gets pgRegSources
+activeMapping :: IR.Value -> PhiGenM IR.Value
+activeMapping (IR.VariableReference symbol) = do
+  let value = IR.VariableReference symbol
+  activeBlock <- gets pgActiveBlock
   sourceBlocks <- gets pgSourceBlocks
-  let blockLabel' = blockLabel (obBlock block)
-  case Map.lookup blockLabel' regSources of
-    Just bRegSources -> case Map.lookup regName bRegSources of
-      Just sourceLabels -> do
-        case Set.size sourceLabels of
-          0 -> getNextRegister -- No register to use
-          1 -> mappedRegister regName (sourceBlocks Map.! Set.findMin sourceLabels) -- Piggyback on existing source
-          _ -> getNextRegister -- Phi into a new register
-      Nothing -> getNextRegister
-    Nothing -> getNextRegister
+  return $ pgbValueRemaps activeBlock Map.! value
 
-remapRegister :: IR.Value -> OrderedBlock -> PhiGenM RegName
-remapRegister regName block = do
-  activeRemaps <- gets pgActiveRemaps
-  let blockLabel' = blockLabel (obBlock block)
-  newName <- remapRegisterName regName block
-  let newRemap = Map.singleton blockLabel' newName
-  let newRemaps = Map.insertWith Map.union regName newRemap activeRemaps
-  modify $ \s -> s { pgActiveRemaps = newRemaps }
-  return newName
+activeMapping value = pure value
 
-mappedRegister :: IR.Value -> OrderedBlock -> PhiGenM RegName
-mappedRegister regName block = do
-  activeRemaps <- gets pgActiveRemaps
-  let blockLabel' = blockLabel (obBlock block)
-  (activeRemaps', mapping) <- case Map.lookup regName activeRemaps of
-    Just remaps -> case Map.lookup blockLabel' remaps of
-      Just mappedReg -> return (activeRemaps, mappedReg)
-      Nothing -> do
-        newReg <- remapRegisterName regName block
-        return (Map.insertWith Map.union regName (Map.singleton blockLabel' newReg) activeRemaps, newReg)
-    Nothing -> do
-      newReg <- getNextRegister
-      let newLabelRemaps = Map.singleton blockLabel' newReg
-      return (Map.insert regName newLabelRemaps activeRemaps, newReg)
-  modify $ \s -> s { pgActiveRemaps = activeRemaps' }
-  return mapping
+rewriteInstruction :: IR.Instruction -> PhiGenM IR.Instruction
+rewriteInstruction (IR.Ret Nothing) = return $ IR.Ret Nothing
+rewriteInstruction (IR.Ret (Just value)) = do
+  remappedRet <- activeMapping value
+  return $ IR.Ret (Just remappedRet)
+rewriteInstruction (IR.Set dest src) = do
+  remappedDest <- newMapping dest
+  remappedSrc <- activeMapping src
+  return $ IR.Set remappedDest remappedSrc
+rewriteInstruction (IR.BinOp op dest src1 src2) = do
+  remappedDest <- newMapping dest
+  remappedSrc1 <- activeMapping src1
+  remappedSrc2 <- activeMapping src2
+  return $ IR.BinOp op remappedDest remappedSrc1 remappedSrc2
+rewriteInstruction (IR.Jmp label) = return $ IR.Jmp label
+rewriteInstruction (IR.JmpIf cond label1 label2) = do
+  remappedCond <- activeMapping cond
+  return $ IR.JmpIf remappedCond label1 label2
+rewriteInstruction (IR.Phi regName operands) = do
+  remappedOperands <- mapM (\(label, val) -> do
+    remappedReg <- activeMapping val
+    return (label, remappedReg)) operands
+  return $ IR.Phi regName remappedOperands
 
-rewriteBlock :: OrderedBlock -> PhiGenM (Block, PhiOuts)
-rewriteBlock block = do
-  let blockLabel' = blockLabel (obBlock block)
-  phiOuts <- generatePhiOuts block
-  newInstructions <- mapM (rewriteInstruction block) (blockInstructions (obBlock block))
-  return (Block { blockLabel = blockLabel', blockInstructions = newInstructions }, phiOuts)
+captureInitialActiveValueBlock :: IR.Value -> PhiGenM ()
+captureInitialActiveValueBlock (IR.VariableReference (AST.Symbol name version)) = do
+  let varRef = AST.Symbol name version
+  let oldValue = IR.VariableReference varRef
+  predecessors <- gets $ IRCA.obPredecessors . pgbCFGBlock . pgActiveBlock
+  if Set.size predecessors > 1
+    then do
+      nextMapping <- newMapping oldValue
+      case nextMapping of
+        IR.Register regName -> modify (\s -> s {
+          pgActiveBlock = (pgActiveBlock s) {
+            pgbPhiSourceNames = Map.insert regName varRef ((pgbPhiSourceNames . pgActiveBlock) s)
+          }
+        })
+        _ -> pure ()
+    else do
+      modify (\s ->
+        let
+          sourceLabel = head $ Set.toList predecessors
+          currentValue = pgbValueRemaps (pgSourceBlocks s Map.! sourceLabel) Map.! oldValue
+        in s {
+          pgActiveBlock = (pgActiveBlock s) {
+            pgbValueRemaps = Map.insert oldValue currentValue ((pgbValueRemaps . pgActiveBlock) s)
+          }
+        })
+  return ()
+captureInitialActiveValueBlock v = pure ()
 
-  where
-    generatePhiOuts :: OrderedBlock -> PhiGenM PhiOuts
-    generatePhiOuts block = do
-      regSources <- gets pgRegSources
-      let blockLabel' = blockLabel (obBlock block)
-      case Map.lookup blockLabel' regSources of
-        Just bRegSources -> do
-          allMainVars <- mapM (\(k, v) -> mappedRegister k block >>= \mainVar ->
-            return (k, mainVar)) (Map.toList bRegSources)
-          return $ Map.fromList allMainVars
-        Nothing -> return Map.empty
+captureInitialActiveValuesBlock :: PhiGenM ()
+captureInitialActiveValuesBlock = do
+  inValues <- gets $ IRCA.bioLiveIn . pgbInOut . pgActiveBlock
+  mapM_ captureInitialActiveValueBlock $ Set.toList inValues
 
-    rewriteInstruction :: OrderedBlock -> Instruction -> PhiGenM Instruction
-    rewriteInstruction block (IR.Ret Nothing) = return $ IR.Ret Nothing
-    rewriteInstruction block (IR.Ret (Just value)) = do
-      remappedValue <- mappedValue value block
-      return $ IR.Ret (Just remappedValue)
-    rewriteInstruction block (IR.Set dest src) = do
-      remappedDest <- remapValue dest block
-      remappedSrc <- mappedValue src block
-      return $ IR.Set remappedDest remappedSrc
-    rewriteInstruction block (IR.BinOp op dest src1 src2) = do
-      remappedDest <- remapValue dest block
-      remappedSrc1 <- mappedValue src1 block
-      remappedSrc2 <- mappedValue src2 block
-      return $ IR.BinOp op remappedDest remappedSrc1 remappedSrc2
-    rewriteInstruction block (IR.Jmp label) = return $ IR.Jmp label
-    rewriteInstruction block (IR.JmpIf cond label1 label2) = do
-      remappedCond <- mappedValue cond block
-      return $ IR.JmpIf remappedCond label1 label2
-    rewriteInstruction block (Phi regName operands) = do
-      remappedOperands <- mapM (\(label, val) -> do
-        remappedReg <- mappedValue val block
-        return (label, remappedReg)) operands
-      return $ Phi regName remappedOperands
-
-prependPhiOuts :: Block -> PhiOuts -> PhiGenM Block
-prependPhiOuts block phiOuts = do
-  newHeader <- generatePhis block phiOuts
-  let newInstructions = blockInstructions block
-  return $ block { blockInstructions = newHeader ++ newInstructions }
-
-  where
-    generatePhis :: Block -> PhiOuts -> PhiGenM [Instruction]
-    generatePhis block phiOuts = do
-      regSources <- gets pgRegSources
-      let blockLabel' = blockLabel block
-      case Map.lookup blockLabel' regSources of
-        Just bRegSources -> do
-          mapM (\(k, v) -> generatePhiOperands k v >>= \ops ->
-            case Map.lookup k phiOuts of
-              Just mainVar -> return $ Phi mainVar ops
-              Nothing -> throwError $ "No main variable found for " ++ show k) (Map.toList bRegSources)
-        Nothing -> return []
-
-    generatePhiOperands :: IR.Value -> Set.Set LabelRef -> PhiGenM [(LabelRef, IR.Value)]
-    generatePhiOperands regName sourceLabels = do
-      sourceBlocks <- gets pgSourceBlocks
-      mapM (\label -> do
-        let sourceBlock = sourceBlocks Map.! label
-        remappedVal <- mappedValue regName sourceBlock
-        return (label, remappedVal)) (Set.toList sourceLabels)
-
-remapValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
-remapValue (IR.Register regName) block = do
-  remappedReg <- remapRegister (IR.Register regName) block
-  return $ IR.Register remappedReg
-remapValue (IR.VariableReference varRef) block = do
-  remappedVar <- remapRegister (IR.VariableReference varRef) block
-  return $ IR.Register remappedVar
-remapValue a _ = return a
-
-mappedValue :: IR.Value -> OrderedBlock -> PhiGenM IR.Value
-mappedValue (IR.Register regName) block = do
-  remappedReg <- mappedRegister (IR.Register regName) block
-  return $ IR.Register remappedReg
-mappedValue (IR.VariableReference varRef) block = do
-  remappedVar <- mappedRegister (IR.VariableReference varRef) block
-  return $ IR.Register remappedVar
-mappedValue a _ = return a
-
-rewriteBlocks :: [OrderedBlock] -> PhiGenM [Block]
-rewriteBlocks blocks = do
-  regSources <- gets pgRegSources
-  sourceBlocks <- gets pgSourceBlocks
-  let blocksMap = Map.fromList [(blockLabel (obBlock b), b) | b <- blocks]
-  modify $ \s -> s { pgRegSources = regSources, pgSourceBlocks = sourceBlocks }
-  blocksAndPhiOuts <- mapM rewriteBlock blocks
-  mapM (uncurry prependPhiOuts) blocksAndPhiOuts
-
-phiGenBlocks :: [Block] -> Except String [Block]
-phiGenBlocks blocks = do
-  let orderedBlocks = orderBlocks blocks
-      regSources = determineRegSources orderedBlocks
-      initialState = PhiGenD {
-        pgNextRegister = RegName "a" 0,
-        pgActiveRemaps = Map.empty,
-        pgRegSources = regSources,
-        pgSourceBlocks = Map.fromList [(blockLabel (obBlock b), b) | b <- orderedBlocks]
+modifyBlockInstructions :: ([IR.Instruction] -> PhiGenM [IR.Instruction]) -> IR.LabelRef -> PhiGenM IR.Block
+modifyBlockInstructions instructionsGen labelRef = do
+  modify (\s -> s { pgActiveBlock = pgSourceBlocks s Map.! labelRef })
+  activeBlockInstrs <- gets $ IR.blockInstructions . IRCA.obBlock . pgbCFGBlock . pgActiveBlock
+  newInstructions <- instructionsGen activeBlockInstrs
+  modify (\s -> s { pgActiveBlock = (pgActiveBlock s) { -- This is pain...
+    pgbCFGBlock = (pgbCFGBlock . pgActiveBlock $ s) {
+      IRCA.obBlock = (IRCA.obBlock . pgbCFGBlock . pgActiveBlock $ s) {
+        IR.blockInstructions = newInstructions
       }
-  evalStateT (rewriteBlocks orderedBlocks) initialState
-  where
-    evalStateT :: PhiGenM a -> PhiGenD -> Except String a
-    evalStateT action initialState =
-      case runExcept (runStateT action initialState) of
-        Left err -> throwError err
-        Right (value, _) -> return value
+    }
+  } })
+  modify (\s -> s { pgSourceBlocks = Map.insert labelRef (pgActiveBlock s) (pgSourceBlocks s) })
+  gets $ IRCA.obBlock . pgbCFGBlock . pgActiveBlock
 
-phiGenProcedure :: IR.Procedure -> Except String IR.Procedure
-phiGenProcedure (IR.Procedure blocks) = do
-  newBlocks <- phiGenBlocks blocks
-  return $ IR.Procedure newBlocks
+prePhiBlockGen :: IR.LabelRef -> PhiGenM IR.Block
+prePhiBlockGen = modifyBlockInstructions (\activeBlockInstrs -> do
+  captureInitialActiveValuesBlock
+  mapM rewriteInstruction activeBlockInstrs)
 
-phiGen :: IR.Module -> Either String IR.Module
-phiGen (IR.Module procedures fieldTable symbolTable) = do
-  newProcedures <- mapM (runExcept . phiGenProcedure) procedures
-  return $ IR.Module newProcedures fieldTable symbolTable
+phiValueGen :: IR.RegName -> IR.VarRef -> PhiGenM IR.Instruction
+phiValueGen regName varRef = do
+  sourceBlocks <- gets pgSourceBlocks
+  predecessors <- gets $ IRCA.obPredecessors . pgbCFGBlock . pgActiveBlock
+  let sourceValues = map (\pred -> (pred, pgbValueRemaps (sourceBlocks Map.! pred) Map.! IR.VariableReference varRef)) $ Set.toList predecessors
+  return $ IR.Phi regName sourceValues
+
+phiBlockGen :: IR.LabelRef -> PhiGenM IR.Block
+phiBlockGen = modifyBlockInstructions (\activeBlockInstrs -> do
+  sourceNames <- gets $ pgbPhiSourceNames . pgActiveBlock
+  phiInstructions <- mapM (uncurry phiValueGen) $ Map.toList sourceNames
+  return $ phiInstructions ++ activeBlockInstrs)
+
+phiGen :: IR.Procedure -> Either String IR.Procedure
+phiGen procedure = do
+  let entryLabel = IR.LabelRef "entry" -- TOD: Proper entry label
+  -- TODO: Re-use a pre-computed CFG
+  let cfg = IRCA.generateCfg procedure
+  let blockOrder = map (IR.blockLabel . IRCA.obBlock) $ IRCA.cfgReversePostOrder cfg entryLabel
+
+  let ctx = IRCA.CFGAContext {
+    IRCA.cfgaUses = IRIA.usesV,
+    IRCA.cfgaDefs = IRIA.defsV
+  }
+  let inOuts = IRCA.cfgLiveInOuts ctx cfg
+  let pgSourceBlocks = Map.mapWithKey (\labelRef cfgBlock -> PGBlock {
+    pgbCFGBlock = cfgBlock,
+    pgbInOut = inOuts Map.! labelRef,
+    pgbValueRemaps = Map.empty,
+    pgbPhiSourceNames = Map.empty
+  }) cfg
+  let phiGenState = PhiGenD {
+    pgLastRegisterVer = Map.empty,
+    pgSourceBlocks = pgSourceBlocks,
+    pgActiveBlock = pgSourceBlocks Map.! entryLabel
+  }
+  let genBlocks = mapM_ prePhiBlockGen blockOrder >> mapM phiBlockGen blockOrder
+
+  case runExcept (evalStateT genBlocks phiGenState) of
+    Left err -> Left err
+    Right res -> Right $ IR.Procedure res

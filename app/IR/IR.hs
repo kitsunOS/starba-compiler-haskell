@@ -1,12 +1,16 @@
 module IR.IR where
 
+-- TODO: Break dependency on AST
 import qualified AST.AST as AST
 import qualified Data.Set as Set
 import Data.Map (Map)
 import Data.List (intercalate)
 
-data Module = Module [Procedure] FieldTable SymbolTable
-  deriving (Eq)
+data Module = Module {
+  moduleProcedures :: [Procedure],
+  fieldTable :: FieldTable,
+  symbolTable :: SymbolTable
+} deriving (Eq)
 
 instance Show Module where
   show (Module procedures fieldTable symbolTable) = intercalate "\n" (map show procedures) ++
@@ -60,7 +64,7 @@ instance Show LabelRef where
   show (LabelRef l) = "[" ++ l ++ "]"
 
 newtype Symbol = Symbol String
-  deriving (Show, Eq)
+  deriving (Show, Eq, Ord)
 
 data Instruction
   = Ret (Maybe Value)

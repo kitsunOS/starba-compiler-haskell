@@ -1,4 +1,7 @@
-module IR.IRInstrAnalysis where
+module IR.IRInstrAnalysis (defs, uses, defsV, usesV, successors) where
+
+import qualified Data.Set as Set
+import qualified Data.Map as Map
 
 import qualified IR.IR as IR
 
@@ -47,3 +50,12 @@ successors :: IR.Instruction -> [IR.LabelRef]
 successors (IR.Jmp label) = [label]
 successors (IR.JmpIf _ trueLabel falseLabel) = [trueLabel, falseLabel]
 successors _ = []
+
+usedRegs :: IR.Block -> (Set.Set IR.Value, Set.Set IR.Value)
+usedRegs block = foldl usedRegs' (Set.empty, Set.empty) (reverse (IR.blockInstructions block))
+  where
+    usedRegs' :: (Set.Set IR.Value, Set.Set IR.Value) -> IR.Instruction -> (Set.Set IR.Value, Set.Set IR.Value)
+    usedRegs' (usedAcc, defAcc) inst =
+      let used = Set.fromList (usesV inst)
+          defs = Set.fromList (defsV inst)
+      in (Set.difference (Set.union usedAcc used) defs, Set.union defAcc defs)

@@ -24,9 +24,9 @@ import qualified X86.X86Reg as X86Reg
 import qualified IR.IRPhiElim
 import qualified Data.Map as Map
 import qualified AST.ASTSymbolRes as ASTSymbolRes
-import qualified IR.IRPhiGen
 import qualified IR.IRPhiGen as IRPhiGen
 import qualified IR.IRValueProp as IRValueProp
+import IR.IRCfgAnalysis (generateCfg)
 
 main :: IO ()
 main = do
@@ -54,7 +54,10 @@ run filename outname = do
   liftIO $ print irLowered
   liftIO $ print "(irLowered)"
 
-  irPhi <- ExceptT $ pure $ IRPhiGen.phiGen irLowered
+  liftIO $ print (map generateCfg $ IR.moduleProcedures irLowered)
+  liftIO $ print "(cfgAnalysis)"
+
+  irPhi <- mapProcedures IRPhiGen.phiGen irLowered
   liftIO $ print irPhi
   liftIO $ print "(irPhi)"
 
@@ -104,3 +107,10 @@ irBlocks _ = error "No blocks in module"
 
 showAll :: (Show a) => Map.Map IR.LabelRef a -> String
 showAll m = unlines $ map (\(k, v) -> show k ++ ": " ++ show v) (Map.toList m)
+
+mapProcedures :: (IR.Procedure -> Either String IR.Procedure) -> IR.Module -> ExceptT String IO IR.Module
+mapProcedures transform mod = do
+  let moduleProcs = IR.moduleProcedures mod
+  let transformedProcsE = traverse transform moduleProcs
+  newProcs <- ExceptT $ pure transformedProcsE
+  pure $ mod { IR.moduleProcedures = newProcs }
