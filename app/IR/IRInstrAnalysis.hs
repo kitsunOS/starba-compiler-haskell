@@ -1,4 +1,4 @@
-module IR.IRInstrAnalysis (defsV, usesV, successors) where
+module IR.IRInstrAnalysis (defsV, usesV, successors, earlyExit) where
 
 import qualified Data.Set as Set
 import qualified Data.Map as Map
@@ -26,6 +26,11 @@ successors :: IR.Instruction -> [IR.LabelRef]
 successors (IR.Jmp label) = [label]
 successors (IR.JmpIf _ trueLabel falseLabel) = [trueLabel, falseLabel]
 successors _ = []
+
+earlyExit :: IR.Instruction -> Bool
+earlyExit (IR.Ret _) = True
+earlyExit (IR.Jmp _) = True
+earlyExit _ = False
 
 usedRegs :: IR.Block -> (Set.Set IR.Value, Set.Set IR.Value)
 usedRegs block = foldl usedRegs' (Set.empty, Set.empty) (reverse (IR.blockInstructions block))

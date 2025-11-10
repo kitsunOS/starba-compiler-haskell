@@ -12,6 +12,7 @@ import qualified Data.Set as Set
 import qualified IR.IR as IR
 import qualified IR.IRInstrAnalysis as IRIA
 import Data.Bifunctor (Bifunctor(first))
+import Control.Monad (foldM)
 
 data CFGBlock = CFGBlock {
   -- TODO: Better to store an IR.LabelRef?
@@ -23,7 +24,12 @@ data CFGBlock = CFGBlock {
 type ControlFlowGraph = Map.Map IR.LabelRef CFGBlock
 
 cfgSuccessors :: IR.Block -> Set.Set IR.LabelRef
-cfgSuccessors block = foldl (\acc instr -> acc `Set.union` Set.fromList (IRIA.successors instr)) Set.empty (IR.blockInstructions block)
+cfgSuccessors block = case foldM (\acc instr ->
+    let newAcc = acc `Set.union` Set.fromList (IRIA.successors instr)
+    in if IRIA.earlyExit instr then Left newAcc else Right newAcc
+  ) Set.empty (IR.blockInstructions block) of
+  Left a -> a
+  Right a -> a
 
 cfgBlocks :: [IR.Block] -> ControlFlowGraph
 cfgBlocks = cfgWithPreds . cfgWithSucs

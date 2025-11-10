@@ -125,6 +125,9 @@ generateInstructions ctx (BinOp op dest src1 src2) = if not (validOperand ctx de
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
 generateInstructions ctx (Jmp (LabelRef label)) = [Asm.Jmp (Asm.Label label)]
+generateInstructions ctx (JmpIf (IR.Immediate v) (LabelRef trueLabel) (LabelRef falseLabel)) = [
+  Asm.Jmp $ Asm.Label (if v == 0 then falseLabel else trueLabel)
+  ]
 generateInstructions ctx (JmpIf cond (LabelRef trueLabel) (LabelRef falseLabel)) = [
   Asm.Cmp (generateOperand ctx cond) (Asm.Immediate 0),
   Asm.Je (Asm.Label falseLabel),

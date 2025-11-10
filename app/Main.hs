@@ -61,7 +61,7 @@ run filename outname = do
   liftIO $ print irPhi
   liftIO $ print "(irPhi)"
 
-  let irValueProp = IRValueProp.propogateValues irPhi
+  irValueProp <- mapProcedures IRValueProp.propogateValues irPhi
   liftIO $ print irValueProp
   liftIO $ print "(irValueProp)"
 
