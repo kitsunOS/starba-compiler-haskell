@@ -1,41 +1,46 @@
-cabal-version:      3.6
-name:               starba
-version:            0.1.0.0
+cabal-version: 3.6
+name: starba
+version: 0.1.0.0
 
--- A short (one-line) description of the package.
-synopsis:          Starba compiler
+synopsis: Starba compiler
 
--- A longer description of the package.
--- description:
+license: MIT
+license-file: LICENSE.txt
+author: Jason Gronn
+maintainer: jasontopia03@gmail.com
 
--- A URL where users can report bugs.
--- bug-reports:
-license:            MIT
-license-file:       LICENSE.txt
-author:             Jason Gronn
-maintainer:         jasontopia03@gmail.com
-
--- A copyright notice.
--- copyright:
--- category:
--- extra-source-files:
+copyright: Copyright (c) 2024 Jason Gronn
+category: MIT
+extra-source-files: LICENSE.txt
 
 executable starba
-    main-is:          Main.hs
-    other-modules:    Parser, Lexer, Register, RegAlloc,
-                      AST.AST, AST.ASTSymbolRes,
-                      IR.IR, IR.IRGen, IR.IRInstrAnalysis, IR.IRPhiElim, IR.IRPhiGen,
-                      IR.IRValueProp, IR.IRCfgAnalysis,
-                      X86.X86Gen, X86.X86Asm, X86.X86Nasm, X86.X86Reg
+  main-is: Main.hs
+  other-modules:
+    Backend.Analysis.IRCfgAnalysis,
+    Backend.Analysis.IRInstrAnalysis,
+    Backend.IR.IR,
+    Backend.IR.IRPhiElim,
+    Backend.IR.IRPhiGen,
+    Backend.Opt.IRValueProp,
+    Backend.Reg.RegAlloc,
+    Backend.Reg.Register,
 
-    -- Modules included in this executable, other than Main.
-    -- other-modules:
+    Frontend.Starba.AST.AST,
+    Frontend.Starba.AST.ASTSymbolRes,
+    Frontend.Starba.Codegen.CodegenMain,
+    Frontend.Starba.Lex.Lexer,
+    Frontend.Starba.Parse.Parser,
 
-    -- LANGUAGE extensions used by modules in this package.
-    -- other-extensions:
-    build-depends:    base >= 4.17.2 && < 5.0,
-                      parsec >= 3.1.16 && < 3.2,
-                      containers >= 0.6.4 && < 0.7,
-                      mtl >= 2.2.2 && < 2.3
-    hs-source-dirs:   app
-    default-language: Haskell2010
+    Target.X86.X86Gen,
+    Target.X86.X86Asm,
+    Target.X86.X86Nasm,
+    Target.X86.X86Reg
+
+  build-depends:    
+    base >= 4.17.2 && < 5.0,
+    parsec >= 3.1.16 && < 3.2,
+    containers >= 0.6.4 && < 0.7,
+    mtl >= 2.2.2 && < 2.3
+
+  hs-source-dirs:   app
+  default-language: Haskell2010

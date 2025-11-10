@@ -1,7 +1,8 @@
-module AST.ASTSymbolRes where
+module Frontend.Starba.AST.ASTSymbolRes where
 
-import qualified AST.AST as AST
 import qualified Data.Map as Map
+
+import qualified Frontend.Starba.AST.AST as AST
 
 type SSym = String
 type DSym = AST.Symbol

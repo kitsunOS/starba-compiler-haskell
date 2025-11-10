@@ -2,6 +2,9 @@
 
 module Main where
 
+import qualified Data.Set as Set
+import qualified Data.Map as Map
+
 import System.Environment (getArgs)
 import System.IO (stderr, hPutStrLn, hPrint)
 
@@ -10,23 +13,23 @@ import Text.Parsec
 import Control.Monad.Except
 import Control.Monad.IO.Class (liftIO)
 
-import Parser
-import AST.AST
-import IR.IRGen (compileModule)
-import qualified X86.X86Gen as X86Gen
-import qualified X86.X86Nasm as X86Nasm
 import Data.Bifunctor (first)
-import qualified RegAlloc
-import qualified IR.IR as IR
-import qualified Data.Set as Set
-import qualified X86.X86Asm as X86Asm
-import qualified X86.X86Reg as X86Reg
-import qualified IR.IRPhiElim
-import qualified Data.Map as Map
-import qualified AST.ASTSymbolRes as ASTSymbolRes
-import qualified IR.IRPhiGen as IRPhiGen
-import qualified IR.IRValueProp as IRValueProp
-import IR.IRCfgAnalysis (generateCfg)
+
+import qualified Frontend.Starba.Parse.Parser as Parser
+import qualified Frontend.Starba.AST.AST as AST
+import qualified Frontend.Starba.Codegen.CodegenMain as Codegen
+import qualified Frontend.Starba.AST.ASTSymbolRes as ASTSymbolRes
+
+import qualified Backend.Reg.RegAlloc as RegAlloc
+import qualified Backend.IR.IR as IR
+import qualified Backend.IR.IRPhiElim as IRPhiElim
+import qualified Backend.IR.IRPhiGen as IRPhiGen
+import qualified Backend.Opt.IRValueProp as IRValueProp
+import qualified Backend.Analysis.IRCfgAnalysis as IRCA
+
+import qualified Target.X86.X86Gen as X86Gen
+import qualified Target.X86.X86Nasm as X86Nasm
+import qualified Target.X86.X86Reg as X86Reg
 
 main :: IO ()
 main = do
@@ -44,17 +47,17 @@ run :: String -> String -> ExceptT String IO ()
 run filename outname = do
   contents <- liftIO $ readFile filename
 
-  rawAst <- ExceptT $ pure $ first show $ parse parseModule filename contents
+  rawAst <- ExceptT $ pure $ first show $ parse Parser.parseModule filename contents
   let ast = ASTSymbolRes.resolveSymbols rawAst
 
   liftIO $ print ast
   liftIO $ print ""
 
-  irLowered <- ExceptT $ pure $ compileModule ast
+  irLowered <- ExceptT $ pure $ Codegen.compileModule ast
   liftIO $ print irLowered
   liftIO $ print "(irLowered)"
 
-  liftIO $ print (map generateCfg $ IR.moduleProcedures irLowered)
+  liftIO $ print (map IRCA.generateCfg $ IR.moduleProcedures irLowered)
   liftIO $ print "(cfgAnalysis)"
 
   irPhi <- mapProcedures IRPhiGen.phiGen irLowered
@@ -65,28 +68,11 @@ run filename outname = do
   liftIO $ print irValueProp
   liftIO $ print "(irValueProp)"
 
-  let irFinal = IR.IRPhiElim.rewriteModule irValueProp
+  let irFinal = IRPhiElim.rewriteModule irValueProp
   liftIO $ print irFinal
   liftIO $ print "(irFinal)"
 
   let ctx = RegAlloc.RegAllocContext X86Reg.intLive X86Reg.regCompat
-
-  {- let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
-      allInOut = RegAlloc.blocksLiveInOut2 (irBlocks irFinal)
-  liftIO $ putStrLn (showAll allInOut)
-
-  let liveness :: [RegAlloc.LiveSets X86Asm.Register32]
-      liveness = map (RegAlloc.liveSets ctx allInOut) (irBlocks irFinal)
-  liftIO $ print liveness
-  liftIO $ print ""
-
-  let interferences = foldl (\m (b, l) -> Map.unionWith Set.union m (RegAlloc.interferences ctx b l)) Map.empty (zip (irBlocks irFinal) liveness)
-  liftIO $ print interferences
-  liftIO $ print ""
-
-  let compatMap = foldl (\m b -> Map.unionWith Set.union m (RegAlloc.compatMap ctx b)) Map.empty (irBlocks irFinal)
-  liftIO $ print compatMap
-  liftIO $ print "" -}
 
   let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks irFinal)
   liftIO $ print allocatedRegisters

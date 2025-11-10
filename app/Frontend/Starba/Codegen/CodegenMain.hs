@@ -1,80 +1,78 @@
-module IR.IRGen (compileModule) where
+module Frontend.Starba.Codegen.CodegenMain (compileModule) where
 
-import qualified AST.AST as AST
-import IR.IR (
-  Module(..), Procedure(..), Block(..), Instruction(..), RegName(..),
-  LabelRef(..), Value(..), SymbolTable(..), FieldTable(..), VarRef)
-import qualified IR.IR as IR
 import qualified Data.Map as Map
-import Control.Monad.State
-import Control.Monad.Except
 import qualified Data.Set as Set
 import qualified Data.Foldable
+import Control.Monad.State
+import Control.Monad.Except
 import Control.Arrow (ArrowLoop(loop))
+
+import qualified Frontend.Starba.AST.AST as AST
+import qualified Backend.IR.IR as IR
 
 -- Data types
 type Sym = AST.Symbol
 
 data IRGenD = IRGenD {
-  irgBlocks :: [Block],
-  irgSymbolTable :: SymbolTable,
-  irgNextRegister :: RegName,
+  irgBlocks :: [IR.Block],
+  irgSymbolTable :: IR.SymbolTable,
+  irgNextRegister :: IR.RegName,
   irgNextSymbolName :: String,
-  irgActiveLabel :: LabelRef,
-  irgAllLabels :: Set.Set LabelRef
+  irgActiveLabel :: IR.LabelRef,
+  irgAllLabels :: Set.Set IR.LabelRef
 }
 type IRGenM = StateT IRGenD (Except String)
 
 defaultState :: IRGenD
 defaultState = IRGenD {
   irgBlocks = [],
-  irgSymbolTable = SymbolTable Map.empty Map.empty,
-  irgNextRegister = RegName "a" 0,
+  irgSymbolTable = IR.SymbolTable Map.empty Map.empty,
+  irgNextRegister = IR.RegName "a" 0,
   irgNextSymbolName = "a",
-  irgActiveLabel = LabelRef "entry",
+  irgActiveLabel = IR.LabelRef "entry",
   irgAllLabels = Set.empty
 }
 
 data DeclarationContribution = DeclarationContribution {
-  declProcedures :: [Procedure],
-  declSymbolTable :: SymbolTable,
-  declFieldTable :: FieldTable
+  declProcedures :: [IR.Procedure],
+  declSymbolTable :: IR.SymbolTable,
+  declFieldTable :: IR.FieldTable
 }
 
 -- IRGen helpers
-nextLabel :: String -> IRGenM LabelRef
+nextLabel :: String -> IRGenM IR.LabelRef
 nextLabel label = nextLabelPostfix label ""
   where
-    nextLabelPostfix :: String -> String -> IRGenM LabelRef
+    nextLabelPostfix :: String -> String -> IRGenM IR.LabelRef
     nextLabelPostfix label postFix = do
       let label' = label ++ case postFix of
             "" -> ""
             _  -> "_" ++ postFix
       allLabels <- gets irgAllLabels
-      if Set.member (LabelRef label') allLabels then
+      if Set.member (IR.LabelRef label') allLabels then
         nextLabelPostfix label (incrementName postFix)
       else (do
-        modify $ \s -> s { irgAllLabels = Set.insert (LabelRef label') (irgAllLabels s) }
-        return $ LabelRef label')
+        modify $ \s -> s { irgAllLabels = Set.insert (IR.LabelRef label') (irgAllLabels s) }
+        return $ IR.LabelRef label')
 
-getNextRegister :: IRGenM RegName
+getNextRegister :: IRGenM IR.RegName
 getNextRegister = do
   regName <- gets irgNextRegister
   modify $ \s -> s { irgNextRegister = nextRegName regName }
   return regName
 
-addInstruction :: Instruction -> IRGenM ()
+addInstruction :: IR.Instruction -> IRGenM ()
 addInstruction instruction = modify $ \s -> s { irgBlocks = addInstructionToBlock instruction (irgBlocks s) (irgActiveLabel s) }
 
-addInstructionToBlock :: Instruction -> [Block] -> LabelRef -> [Block]
-addInstructionToBlock instruction [] label = [Block label [instruction]]
-addInstructionToBlock instruction (Block label instructions : blocks) activeLabel
-  | label == activeLabel = Block label (instruction : instructions) : blocks
-  | otherwise = Block label instructions : addInstructionToBlock instruction blocks activeLabel
+addInstructionToBlock :: IR.Instruction -> [IR.Block] -> IR.LabelRef -> [IR.Block]
+addInstructionToBlock instruction [] label = [IR.Block label [instruction]]
+addInstructionToBlock instruction (IR.Block label instructions : blocks) activeLabel
+  | label == activeLabel = IR.Block label (instruction : instructions) : blocks
+  | otherwise = IR.Block label instructions : addInstructionToBlock instruction blocks activeLabel
 
-startBlock :: LabelRef -> LabelRef -> IRGenM ()
+startBlock :: IR.LabelRef -> IR.LabelRef -> IRGenM ()
 startBlock label inheritedLabel = do
-  modify $ \s -> s { irgBlocks = Block label [] : irgBlocks s, irgActiveLabel = label }
+  modify $ \s -> s { irgBlocks = IR.Block label [] : irgBlocks s, irgActiveLabel = label }
   return ()
   where
     inheritVars newLabel activeRegisters inheritedLabel =
@@ -85,34 +83,34 @@ allocateSymbol value = do
   symbolName <- gets irgNextSymbolName
   symbolTable <- gets irgSymbolTable
   let lit = IR.StringLiteral value
-      existingSymbol = Map.lookup lit (reverseMap symbolTable)
+      existingSymbol = Map.lookup lit (IR.reverseMap symbolTable)
   case existingSymbol of
     Just name -> return name
     Nothing -> do
-      let symbolMap' = Map.insert symbolName lit (symbolMap symbolTable)
-          reverseMap' = Map.insert lit symbolName (reverseMap symbolTable)
-          symbolTable' = SymbolTable symbolMap' reverseMap'
+      let symbolMap' = Map.insert symbolName lit (IR.symbolMap symbolTable)
+          reverseMap' = Map.insert lit symbolName (IR.reverseMap symbolTable)
+          symbolTable' = IR.SymbolTable symbolMap' reverseMap'
       modify $ \s -> s { irgSymbolTable = symbolTable', irgNextSymbolName = incrementName symbolName }
       return symbolName
 
 -- Small helpers
-mergeSymbolTables :: [SymbolTable] -> SymbolTable
-mergeSymbolTables = foldl mergeSymbolTable (SymbolTable Map.empty Map.empty)
+mergeSymbolTables :: [IR.SymbolTable] -> IR.SymbolTable
+mergeSymbolTables = foldl mergeSymbolTable (IR.SymbolTable Map.empty Map.empty)
 
-mergeSymbolTable :: SymbolTable -> SymbolTable -> SymbolTable
-mergeSymbolTable (SymbolTable symbolMap1 reverseMap1) (SymbolTable symbolMap2 reverseMap2) =
-  SymbolTable (Map.union symbolMap1 symbolMap2) (Map.union reverseMap1 reverseMap2)
+mergeSymbolTable :: IR.SymbolTable -> IR.SymbolTable -> IR.SymbolTable
+mergeSymbolTable (IR.SymbolTable symbolMap1 reverseMap1) (IR.SymbolTable symbolMap2 reverseMap2) =
+  IR.SymbolTable (Map.union symbolMap1 symbolMap2) (Map.union reverseMap1 reverseMap2)
 
-mergeFieldTables :: [FieldTable] -> FieldTable
-mergeFieldTables = foldl mergeFieldTable (FieldTable Map.empty)
+mergeFieldTables :: [IR.FieldTable] -> IR.FieldTable
+mergeFieldTables = foldl mergeFieldTable (IR.FieldTable Map.empty)
 
-mergeFieldTable :: FieldTable -> FieldTable -> FieldTable
-mergeFieldTable (FieldTable fieldMap1) (FieldTable fieldMap2) =
-  FieldTable (Map.union fieldMap1 fieldMap2)
+mergeFieldTable :: IR.FieldTable -> IR.FieldTable -> IR.FieldTable
+mergeFieldTable (IR.FieldTable fieldMap1) (IR.FieldTable fieldMap2) =
+  IR.FieldTable (Map.union fieldMap1 fieldMap2)
 
-nextRegName :: RegName -> RegName
-nextRegName (RegName prefix num) =
-  RegName (incrementName prefix) 0
+nextRegName :: IR.RegName -> IR.RegName
+nextRegName (IR.RegName prefix num) =
+  IR.RegName (incrementName prefix) 0
 
 incrementName :: String -> String
 incrementName = reverse . increment . reverse
@@ -145,23 +143,23 @@ compileVarDeclaration name visibility (AST.VariableDefinition typ initializer) =
   let
     -- TODO: Evaluate the actual initializer
     -- TODO: How to format field name?
-    fieldTable = FieldTable $ Map.singleton (show name) (IR.IntLiteral 0)
+    fieldTable = IR.FieldTable $ Map.singleton (show name) (IR.IntLiteral 0)
   in
-    return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) fieldTable
+    return $ DeclarationContribution [] (IR.SymbolTable Map.empty Map.empty) fieldTable
 
 compileEnumDeclaration :: Sym -> AST.Visibility -> AST.EnumDefinition Sym -> IRGenM DeclarationContribution
 compileEnumDeclaration name visibility (AST.EnumDefinition _ values members) =
   -- TODO: Implement
-  return $ DeclarationContribution [] (SymbolTable Map.empty Map.empty) (FieldTable Map.empty)
+  return $ DeclarationContribution [] (IR.SymbolTable Map.empty Map.empty) (IR.FieldTable Map.empty)
 
 compileFuncDeclaration :: Sym -> AST.Visibility -> AST.FunctionDefinition Sym -> IRGenM DeclarationContribution
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ Nothing) = throwError "Function declaration without body not yet supported"
 compileFuncDeclaration _ _ (AST.FunctionDefinition _ _ (Just body)) = do
   compileFuncBody body
-  let reverseBlock (Block label instructions) = Block label (reverse instructions)
+  let reverseBlock (IR.Block label instructions) = IR.Block label (reverse instructions)
   blocks <- gets (map reverseBlock . reverse . irgBlocks)
   symbolTable <- gets irgSymbolTable
-  return $ DeclarationContribution [Procedure blocks] symbolTable (FieldTable Map.empty)
+  return $ DeclarationContribution [IR.Procedure blocks] symbolTable (IR.FieldTable Map.empty)
 
 compileFuncBody :: AST.FunctionBody Sym -> IRGenM ()
 compileFuncBody (AST.FunctionBody stmts) = mapM_ compileStatement stmts
@@ -243,30 +241,30 @@ compileInnerVarDeclaration :: Sym -> AST.VariableDefinition Sym -> IRGenM ()
 compileInnerVarDeclaration name (AST.VariableDefinition typ Nothing) = throwError "Inner variable declaration without initializer not yet supported"
 compileInnerVarDeclaration name (AST.VariableDefinition typ (Just initializer)) = do
   val <- compileExpression initializer
-  addInstruction $ Set (VariableReference name) val
+  addInstruction $ IR.Set (IR.VariableReference name) val
 
 compileReturn :: Maybe (AST.Expression Sym) -> IRGenM ()
-compileReturn Nothing = addInstruction $ Ret Nothing
+compileReturn Nothing = addInstruction $ IR.Ret Nothing
 compileReturn (Just expr) = do
   val <- compileExpression expr
-  addInstruction $ Ret (Just val)
+  addInstruction $ IR.Ret (Just val)
 
 compileAssignment :: Sym -> AST.Expression Sym -> IRGenM IR.Value
 compileAssignment varName expr = do
   val <- compileExpression expr
-  addInstruction $ Set (VariableReference varName) val
+  addInstruction $ IR.Set (IR.VariableReference varName) val
   return val
 
-compileExpression :: AST.Expression Sym -> IRGenM Value
+compileExpression :: AST.Expression Sym -> IRGenM IR.Value
 compileExpression (AST.NumberLiteral num) = return $ IR.Immediate num
 compileExpression (AST.StringLiteral str) = do
   symbolName <- allocateSymbol str
-  return $ SymbolReference symbolName
+  return $ IR.SymbolReference symbolName
 compileExpression (AST.BinOp op left right) = do
   leftVal <- compileExpression left
   rightVal <- compileExpression right
   regName <- getNextRegister
-  addInstruction $ IR.BinOp (irBinOp op) (Register regName) leftVal rightVal
+  addInstruction $ IR.BinOp (irBinOp op) (IR.Register regName) leftVal rightVal
   return $ IR.Register regName
 compileExpression (AST.Variable varName) = return $ IR.VariableReference varName
 compileExpression (AST.Ternary cond trueExpr falseExpr) = do

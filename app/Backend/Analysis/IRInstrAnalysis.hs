@@ -1,9 +1,9 @@
-module IR.IRInstrAnalysis (defsV, usesV, successors, earlyExit) where
+module Backend.Analysis.IRInstrAnalysis (defsV, usesV, successors, earlyExit) where
 
 import qualified Data.Set as Set
 import qualified Data.Map as Map
 
-import qualified IR.IR as IR
+import qualified Backend.IR.IR as IR
 
 defsV :: IR.Instruction -> [IR.Value]
 defsV (IR.Ret _) = []

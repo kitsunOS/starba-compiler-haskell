@@ -1,4 +1,4 @@
-module AST.AST where
+module Frontend.Starba.AST.AST where
 
 newtype Module sym = Module {
   declarations :: [Declaration sym]

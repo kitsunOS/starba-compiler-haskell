@@ -1,7 +1,7 @@
-module X86.X86Reg (intLive, regCompat) where
+module Target.X86.X86Reg (intLive, regCompat) where
 
-import qualified X86.X86Asm as Asm
-import qualified IR.IR as IR
+import qualified Target.X86.X86Asm as Asm
+import qualified Backend.IR.IR as IR
 
 intLive :: IR.Instruction -> [IR.RegEntry Asm.Register32]
 intLive (IR.Ret _) = []

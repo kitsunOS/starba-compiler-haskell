@@ -1,15 +1,15 @@
-module RegAlloc where
+module Backend.Reg.RegAlloc where
 
-import qualified IR.IR as IR
-import qualified IR.IRCfgAnalysis as IRCA
-import qualified IR.IRInstrAnalysis as IRIA
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified Register
 import Data.Foldable (maximumBy)
 import Data.Ord (comparing)
-import IR.IRCfgAnalysis (CFGAContext)
 import Data.Maybe (mapMaybe)
+
+import qualified Backend.IR.IR as IR
+import qualified Backend.Analysis.IRCfgAnalysis as IRCA
+import qualified Backend.Analysis.IRInstrAnalysis as IRIA
+import qualified Backend.Reg.Register as Register
 
 newtype LiveSets a = LiveSets {
   liveInstrs :: [Set.Set (IR.RegEntry a)]
@@ -47,7 +47,7 @@ defsR instr = mapMaybe valueToRegName (IRIA.defsV instr)
 defsRE :: (Ord a, Register.Register a) => IR.Instruction -> [IR.RegEntry a]
 defsRE = map IR.Virtual . defsR
 
-cfgaContext :: (Ord a, Register.Register a) => CFGAContext (IR.RegEntry a)
+cfgaContext :: (Ord a, Register.Register a) => IRCA.CFGAContext (IR.RegEntry a)
 cfgaContext = IRCA.CFGAContext {
   IRCA.cfgaUses = usesRE,
   IRCA.cfgaDefs = defsRE

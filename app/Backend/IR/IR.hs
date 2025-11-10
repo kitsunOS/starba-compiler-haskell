@@ -1,10 +1,11 @@
-module IR.IR where
+module Backend.IR.IR where
+
+import qualified Data.Set as Set
+import qualified Data.Map as Map
+import Data.List (intercalate)
 
 -- TODO: Break dependency on AST
-import qualified AST.AST as AST
-import qualified Data.Set as Set
-import Data.Map (Map)
-import Data.List (intercalate)
+import qualified Frontend.Starba.AST.AST as AST
 
 data Module = Module {
   moduleProcedures :: [Procedure],
@@ -111,12 +112,12 @@ instance Show Literal where
   show (StringLiteral s) = s
 
 data SymbolTable = SymbolTable {
-  symbolMap :: Map String Literal,
-  reverseMap :: Map Literal String
+  symbolMap :: Map.Map String Literal,
+  reverseMap :: Map.Map Literal String
 } deriving (Show, Eq)
 
 newtype FieldTable = FieldTable {
-  fieldMap :: Map String Literal
+  fieldMap :: Map.Map String Literal
 } deriving (Show, Eq)
 
 data RegEntry a

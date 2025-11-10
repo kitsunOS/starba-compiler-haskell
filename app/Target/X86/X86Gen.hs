@@ -1,28 +1,28 @@
-module X86.X86Gen where
+module Target.X86.X86Gen where
 
-import qualified X86.X86Asm as Asm
-import IR.IR (Module(..), Procedure(..), Block(..), Instruction(..), LabelRef(..), SymbolTable(..))
-import qualified IR.IR as IR
 import qualified Data.Map as Map
-import qualified RegAlloc
+
+import qualified Target.X86.X86Asm as Asm
+import qualified Backend.IR.IR as IR
+import qualified Backend.Reg.RegAlloc as RegAlloc
 
 newtype GenerationContext = GenerationContext {
   gAllocation :: RegAlloc.Allocation Asm.Register32
 }
 
 generateAsm :: GenerationContext -> IR.Module -> Either String Asm.X86Module
-generateAsm ctx (Module procedures fieldTable symbolTable) = Right $ Asm.X86Module (generateProcedures ctx procedures ++ generateSymbols symbolTable)
+generateAsm ctx (IR.Module procedures fieldTable symbolTable) = Right $ Asm.X86Module (generateProcedures ctx procedures ++ generateSymbols symbolTable)
 
-generateProcedures :: GenerationContext -> [Procedure] -> [Asm.Section]
+generateProcedures :: GenerationContext -> [IR.Procedure] -> [Asm.Section]
 generateProcedures ctx = map (generateProcedure ctx)
 
 -- TODO: We'll need to be able to merge sections with the same name
-generateProcedure :: GenerationContext -> Procedure -> Asm.Section
-generateProcedure ctx (Procedure blocks) = Asm.Section "text"
+generateProcedure :: GenerationContext -> IR.Procedure -> Asm.Section
+generateProcedure ctx (IR.Procedure blocks) = Asm.Section "text"
   (generateBlock ctx True (head blocks) : map (generateBlock ctx False) (tail blocks))
 
-generateBlock :: GenerationContext -> Bool -> Block -> Asm.LabelledBlock
-generateBlock ctx global (Block (IR.LabelRef labelName) instructions) = Asm.LabelledBlock {
+generateBlock :: GenerationContext -> Bool -> IR.Block -> Asm.LabelledBlock
+generateBlock ctx global (IR.Block (IR.LabelRef labelName) instructions) = Asm.LabelledBlock {
   Asm.blockLabel = Asm.Label labelName,
   Asm.blockInsts = if global then entryHeader ++ instructions' else instructions',
   Asm.blockGlobal = global
@@ -49,17 +49,17 @@ safeExit (instr : rest) = case instr of
   _ -> instr : safeExit rest
 
 -- TODO: Is the validOperand a good approach? Or should this be handled elsewhere?
-generateInstructions :: GenerationContext -> Instruction -> [Asm.Instr]
-generateInstructions ctx (Ret (Just value)) = [
+generateInstructions :: GenerationContext -> IR.Instruction -> [Asm.Instr]
+generateInstructions ctx (IR.Ret (Just value)) = [
   Asm.Mov (Asm.Register Asm.EAX) (generateOperand ctx value),
   Asm.Ret
   ]
-generateInstructions ctx (Ret Nothing) = [Asm.Ret]
-generateInstructions ctx (Set dest src) = [Asm.Mov rDest rSrc1 | validOperand ctx dest]
+generateInstructions ctx (IR.Ret Nothing) = [Asm.Ret]
+generateInstructions ctx (IR.Set dest src) = [Asm.Mov rDest rSrc1 | validOperand ctx dest]
   where
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src
-generateInstructions ctx (BinOp IR.Add dest src1 src2)
+generateInstructions ctx (IR.BinOp IR.Add dest src1 src2)
   | not (validOperand ctx dest) = []
   | rDest == rSrc1 = [
     Asm.Add rDest rSrc2]
@@ -72,7 +72,7 @@ generateInstructions ctx (BinOp IR.Add dest src1 src2)
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp IR.Sub dest src1 src2)
+generateInstructions ctx (IR.BinOp IR.Sub dest src1 src2)
   | not (validOperand ctx dest) = []
   | rDest == rSrc1 = [
     Asm.Sub rDest rSrc2]
@@ -87,7 +87,7 @@ generateInstructions ctx (BinOp IR.Sub dest src1 src2)
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp IR.Mul dest src1 src2) = if not (validOperand ctx dest) then [] else [
+generateInstructions ctx (IR.BinOp IR.Mul dest src1 src2) = if not (validOperand ctx dest) then [] else [
   -- TODO: Does EDX need to be 0?
   Asm.Mov (Asm.Register Asm.EAX) rSrc1,
   Asm.Mul rSrc2,
@@ -97,7 +97,7 @@ generateInstructions ctx (BinOp IR.Mul dest src1 src2) = if not (validOperand ct
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp IR.Div dest src1 src2) = if not (validOperand ctx dest) then [] else [
+generateInstructions ctx (IR.BinOp IR.Div dest src1 src2) = if not (validOperand ctx dest) then [] else [
   Asm.Mov (Asm.Register Asm.EDX) (Asm.Immediate 0),
   Asm.Mov (Asm.Register Asm.EAX) rSrc1,
   Asm.Div rSrc2,
@@ -107,7 +107,7 @@ generateInstructions ctx (BinOp IR.Div dest src1 src2) = if not (validOperand ct
     rDest = generateOperand ctx dest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (BinOp op dest src1 src2) = if not (validOperand ctx dest) then [] else
+generateInstructions ctx (IR.BinOp op dest src1 src2) = if not (validOperand ctx dest) then [] else
   [
     Asm.Cmp rSrc1 rSrc2,
     case op of
@@ -124,18 +124,18 @@ generateInstructions ctx (BinOp op dest src1 src2) = if not (validOperand ctx de
     rDest8 = Asm.reg32To8 rDest
     rSrc1 = generateOperand ctx src1
     rSrc2 = generateOperand ctx src2
-generateInstructions ctx (Jmp (LabelRef label)) = [Asm.Jmp (Asm.Label label)]
-generateInstructions ctx (JmpIf (IR.Immediate v) (LabelRef trueLabel) (LabelRef falseLabel)) = [
+generateInstructions ctx (IR.Jmp (IR.LabelRef label)) = [Asm.Jmp (Asm.Label label)]
+generateInstructions ctx (IR.JmpIf (IR.Immediate v) (IR.LabelRef trueLabel) (IR.LabelRef falseLabel)) = [
   Asm.Jmp $ Asm.Label (if v == 0 then falseLabel else trueLabel)
   ]
-generateInstructions ctx (JmpIf cond (LabelRef trueLabel) (LabelRef falseLabel)) = [
+generateInstructions ctx (IR.JmpIf cond (IR.LabelRef trueLabel) (IR.LabelRef falseLabel)) = [
   Asm.Cmp (generateOperand ctx cond) (Asm.Immediate 0),
   Asm.Je (Asm.Label falseLabel),
   Asm.Jmp (Asm.Label trueLabel)
   ]
 
-generateSymbols :: SymbolTable -> [Asm.Section]
-generateSymbols (SymbolTable symbolMap _) = [Asm.Section "data" (map generateSymbol (Map.toList symbolMap))]
+generateSymbols :: IR.SymbolTable -> [Asm.Section]
+generateSymbols (IR.SymbolTable symbolMap _) = [Asm.Section "data" (map generateSymbol (Map.toList symbolMap))]
 
 generateSymbol :: (String, IR.Literal) -> Asm.LabelledBlock
 generateSymbol (name, lit) = Asm.LabelledBlock {

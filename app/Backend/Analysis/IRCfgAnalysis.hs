@@ -1,4 +1,4 @@
-module IR.IRCfgAnalysis (
+module Backend.Analysis.IRCfgAnalysis (
   ControlFlowGraph,
   CFGBlock (..),
   BlockInOut (..),
@@ -9,10 +9,11 @@ module IR.IRCfgAnalysis (
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
-import qualified IR.IR as IR
-import qualified IR.IRInstrAnalysis as IRIA
 import Data.Bifunctor (Bifunctor(first))
 import Control.Monad (foldM)
+
+import qualified Backend.IR.IR as IR
+import qualified Backend.Analysis.IRInstrAnalysis as IRIA
 
 data CFGBlock = CFGBlock {
   -- TODO: Better to store an IR.LabelRef?

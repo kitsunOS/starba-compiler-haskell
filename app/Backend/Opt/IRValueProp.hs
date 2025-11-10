@@ -1,10 +1,10 @@
-module IR.IRValueProp (propogateValues) where
+module Backend.Opt.IRValueProp (propogateValues) where
 
-import qualified IR.IR as IR
-import qualified Data.Map as Map
 import Data.Maybe (fromMaybe, isJust)
 import qualified Data.Set as Set
-import qualified Debug.Trace as Trace
+import qualified Data.Map as Map
+
+import qualified Backend.IR.IR as IR
 
 type LastValues = Map.Map IR.RegName IR.Value
 

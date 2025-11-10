@@ -1,9 +1,10 @@
-module X86.X86Nasm (toNasmStr) where
+module Target.X86.X86Nasm (toNasmStr) where
 
-import X86.X86Asm
 import Numeric (showHex)
 import Data.List (intercalate)
-import qualified Register
+
+import Target.X86.X86Asm
+import qualified Backend.Reg.Register as Register
 
 toNasmStr :: X86Module -> String
 toNasmStr (X86Module sections) = intercalate "\n\n" $ map sectionToNasm sections

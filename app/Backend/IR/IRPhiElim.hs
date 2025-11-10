@@ -1,11 +1,13 @@
-module IR.IRPhiElim (rewriteModule) where
+module Backend.IR.IRPhiElim (rewriteModule) where
 
-import qualified IR.IR as IR
+
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified GHC.Event as Map
-type PhiCaptures = Map.Map IR.LabelRef (Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.Value)))
 
+import qualified Backend.IR.IR as IR
+
+type PhiCaptures = Map.Map IR.LabelRef (Map.Map IR.LabelRef (Set.Set (IR.RegName, IR.Value)))
 type RegSets = Map.Map IR.RegName (Set.Set IR.Value)
 
 rewriteModule :: IR.Module -> IR.Module

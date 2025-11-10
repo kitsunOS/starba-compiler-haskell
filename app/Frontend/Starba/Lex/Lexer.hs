@@ -1,4 +1,4 @@
-module Lexer where
+module Frontend.Starba.Lex.Lexer where
 
 import Text.Parsec.String
 import Text.Parsec.Language

@@ -1,5 +1,6 @@
-module X86.X86Asm where
-import qualified Register
+module Target.X86.X86Asm where
+
+import qualified Backend.Reg.Register as Register
 
 newtype X86Module = X86Module [Section]
 

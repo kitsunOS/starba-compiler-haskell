@@ -1,14 +1,15 @@
-module IR.IRPhiGen (phiGen) where
+module Backend.IR.IRPhiGen (phiGen) where
 
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import Control.Monad.Except (Except, runExcept, MonadError (throwError))
 import Control.Monad.State (StateT (runStateT), gets, modify, mapStateT, evalStateT)
-import qualified IR.IR as IR
-import qualified IR.IRCfgAnalysis as IRCA
-import qualified IR.IRInstrAnalysis as IRIA
+
+import qualified Backend.IR.IR as IR
+import qualified Backend.Analysis.IRCfgAnalysis as IRCA
+import qualified Backend.Analysis.IRInstrAnalysis as IRIA
 -- TODO: Break dependency on AST
-import qualified AST.AST as AST
+import qualified Frontend.Starba.AST.AST as AST
 
 type ValueRemaps = Map.Map IR.Value IR.Value;
 
