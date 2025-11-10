@@ -1,22 +1,15 @@
 module RegAlloc where
+
 import qualified IR.IR as IR
+import qualified IR.IRCfgAnalysis as IRCA
 import qualified IR.IRInstrAnalysis as IRIA
 import qualified Data.Map as Map
 import qualified Data.Set as Set
 import qualified Register
 import Data.Foldable (maximumBy)
 import Data.Ord (comparing)
-
-data BlockUseDefs a = BlockUseDefs {
-  uses :: Set.Set (IR.RegEntry a),
-  defs :: Set.Set (IR.RegEntry a),
-  successors :: Set.Set IR.LabelRef
-} deriving (Show, Eq)
-
-data BlockInOut a = BlockInOut {
-  liveIn :: Set.Set (IR.RegEntry a),
-  liveOut :: Set.Set (IR.RegEntry a)
-} deriving (Show, Eq)
+import IR.IRCfgAnalysis (CFGAContext)
+import Data.Maybe (mapMaybe)
 
 newtype LiveSets a = LiveSets {
   liveInstrs :: [Set.Set (IR.RegEntry a)]
@@ -38,70 +31,46 @@ type CompatMap a = Map.Map IR.RegName (Set.Set a)
 emptyLiveSets :: LiveSets a
 emptyLiveSets = LiveSets []
 
-emptyUseDefs :: BlockUseDefs a
-emptyUseDefs = BlockUseDefs Set.empty Set.empty Set.empty
+valueToRegName :: IR.Value -> Maybe IR.RegName
+valueToRegName (IR.Register regName) = Just regName
+valueToRegName _ = Nothing
 
-emptyInOut :: BlockInOut a
-emptyInOut = BlockInOut Set.empty Set.empty
+usesR :: IR.Instruction -> [IR.RegName]
+usesR instr = mapMaybe valueToRegName (IRIA.usesV instr)
+
+usesRE :: (Ord a, Register.Register a) => IR.Instruction -> [IR.RegEntry a]
+usesRE = map IR.Virtual . usesR
+
+defsR :: IR.Instruction -> [IR.RegName]
+defsR instr = mapMaybe valueToRegName (IRIA.defsV instr)
+
+defsRE :: (Ord a, Register.Register a) => IR.Instruction -> [IR.RegEntry a]
+defsRE = map IR.Virtual . defsR
+
+cfgaContext :: (Ord a, Register.Register a) => CFGAContext (IR.RegEntry a)
+cfgaContext = IRCA.CFGAContext {
+  IRCA.cfgaUses = usesRE,
+  IRCA.cfgaDefs = defsRE
+}
 
 allocateRegisters :: (Ord a, Register.Register a, Show a) => RegAllocContext a -> [IR.Block] -> Allocation a
 allocateRegisters ctx blocks =
   let
     compatMap' = foldl (\m b -> Map.unionWith Set.union m (compatMap ctx b)) Map.empty blocks
-    inOuts = blocksLiveInOut2 blocks
+    inOuts = IRCA.cfgLiveInOut cfgaContext (IRCA.cfgBlocks blocks)
     liveSets' = map (liveSets ctx inOuts) blocks
     interferences' = foldl (\m (b, l) -> Map.unionWith Set.union m (interferences ctx b l)) Map.empty (zip blocks liveSets')
   in
     colors interferences' compatMap'
 
-blocksLiveInOut2 :: (Ord a, Register.Register a) => [IR.Block] -> Map.Map IR.LabelRef (BlockInOut a)
-blocksLiveInOut2 = blocksLiveInOut . blocksUseDefs
-
-blocksUseDefs :: (Ord a, Register.Register a) => [IR.Block] -> Map.Map IR.LabelRef (BlockUseDefs a)
-blocksUseDefs blocks = Map.fromList $ map (\b -> (IR.blockLabel b, blockUseDefs b)) blocks
-  where
-    blockUseDefs :: (Ord a0, Register.Register a0) => IR.Block -> BlockUseDefs a0
-    blockUseDefs block = snd $ foldl useDef (Set.empty, emptyUseDefs) (reverse $ IR.blockInstructions block)
-    useDef :: (Ord a0, Register.Register a0) => (Set.Set (IR.RegEntry a0), BlockUseDefs a0) -> IR.Instruction -> (Set.Set (IR.RegEntry a0), BlockUseDefs a0)
-    useDef (live, useDefs) instr =
-      let
-        defs' = Set.fromList (map IR.Virtual (IRIA.defs instr))
-        uses' = Set.fromList (map IR.Virtual (IRIA.uses instr))
-        live' = (live Set.\\ defs') `Set.union` uses'
-        defs'' = Set.union defs' (defs useDefs)
-        successors' = Set.union (Set.fromList (IRIA.successors instr)) (successors useDefs)
-        useDefs' = BlockUseDefs live' defs'' successors'
-      in
-        (live', useDefs')
-
-blocksLiveInOut :: (Ord a, Register.Register a) => Map.Map IR.LabelRef (BlockUseDefs a) -> Map.Map IR.LabelRef (BlockInOut a)
-blocksLiveInOut blocks = iterateUntilStable (manyBlocksLiveInOut Map.empty blocks) blocks
-  where
-    iterateUntilStable :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> Map.Map IR.LabelRef (BlockUseDefs a0) -> Map.Map IR.LabelRef (BlockInOut a0)
-    iterateUntilStable blocks' useDefs =
-      let
-        blocks'' = manyBlocksLiveInOut blocks' useDefs
-        changed = Map.filterWithKey (\k v -> v /= blocks' Map.! k) blocks''
-      in
-        if Map.null changed then blocks' else iterateUntilStable blocks'' useDefs
-    manyBlocksLiveInOut :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> Map.Map IR.LabelRef (BlockUseDefs a0) -> Map.Map IR.LabelRef (BlockInOut a0)
-    manyBlocksLiveInOut init = Map.mapWithKey (\k v -> blockLiveInOut init v)
-    blockLiveInOut :: (Ord a0, Register.Register a0) => Map.Map IR.LabelRef (BlockInOut a0) -> BlockUseDefs a0 -> BlockInOut a0
-    blockLiveInOut init useDefs =
-      let
-        liveOut' = Set.unions (Set.map (\s -> liveIn (Map.findWithDefault emptyInOut s init)) (successors useDefs))
-        liveIn' = Set.union (Set.difference liveOut' (defs useDefs)) (uses useDefs)
-      in
-        BlockInOut liveIn' liveOut'
-
-liveSets :: (Ord a, Register.Register a) => RegAllocContext a -> Map.Map IR.LabelRef (BlockInOut a) -> IR.Block -> LiveSets a
-liveSets ctx blockInOuts (IR.Block name instructions) = snd $ foldl (liveSet ctx) (liveOut (blockInOuts Map.! name), emptyLiveSets) (reverse instructions)
+liveSets :: (Ord a, Register.Register a) => RegAllocContext a -> Map.Map IR.LabelRef (IRCA.BlockInOut (IR.RegEntry a)) -> IR.Block -> LiveSets a
+liveSets ctx blockInOuts (IR.Block name instructions) = snd $ foldl (liveSet ctx) (IRCA.bioLiveIn (blockInOuts Map.! name), emptyLiveSets) (reverse instructions)
   where
     liveSet :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> (Set.Set (IR.RegEntry a0), LiveSets a0) -> IR.Instruction -> (Set.Set (IR.RegEntry a0), LiveSets a0)
     liveSet ctx (live, liveSets') instr =
       let
-        defs' = Set.fromList (map IR.Virtual (IRIA.defs instr))
-        uses' = Set.fromList (map IR.Virtual (IRIA.uses instr))
+        defs' = Set.fromList $ defsRE instr
+        uses' = Set.fromList $ usesRE instr
         live' = (live Set.\\ defs') `Set.union` uses'
         localLive = live' `Set.union` Set.fromList (intLive ctx instr)
         instrs = (live' `Set.union` localLive) : liveInstrs liveSets'
@@ -112,7 +81,7 @@ interferences :: (Ord a, Register.Register a) => RegAllocContext a -> IR.Block -
 interferences ctx block liveSets = foldl (collapseMap ctx) Map.empty (zip (IR.blockInstructions block) (liveInstrs liveSets))
   where
     collapseMap :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> InterferenceGraph a0 -> (IR.Instruction, Set.Set (IR.RegEntry a0)) -> InterferenceGraph a0
-    collapseMap ctx map' (instr, live) = insertPhysDefs (insertDefs map' (IRIA.uses instr ++ IRIA.defs instr) live) (intLive ctx instr) live
+    collapseMap ctx map' (instr, live) = insertPhysDefs (insertDefs map' (usesR instr ++ defsR instr) live) (intLive ctx instr) live
     insertDefs :: (Ord a0, Register.Register a0) => InterferenceGraph a0 -> [IR.RegName] -> Set.Set (IR.RegEntry a0) -> InterferenceGraph a0
     insertDefs map' uses live = foldl (\m u -> insertDef (live Set.\\ Set.singleton (IR.Virtual u)) m u) map' uses
     insertDef :: (Ord a0, Register.Register a0) => Set.Set (IR.RegEntry a0) -> InterferenceGraph a0 -> IR.RegName -> InterferenceGraph a0
@@ -135,7 +104,7 @@ compatMap :: (Ord a, Register.Register a) => RegAllocContext a -> IR.Block -> Co
 compatMap ctx block = foldl (reduceCompat ctx) Map.empty (IR.blockInstructions block)
   where
     reduceCompat :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> CompatMap a0 -> IR.Instruction -> CompatMap a0
-    reduceCompat ctx compatMap instr = foldl (\m reg -> reduceReg ctx m reg instr) compatMap (IRIA.uses instr ++ IRIA.defs instr)
+    reduceCompat ctx compatMap instr = foldl (\m reg -> reduceReg ctx m reg instr) compatMap (usesR instr ++ defsR instr)
     reduceReg :: (Ord a0, Register.Register a0) => RegAllocContext a0 -> CompatMap a0 -> IR.RegName -> IR.Instruction -> CompatMap a0
     -- If an entry already exists, intersect with racRegCompat, else, set to racRegCompat
     reduceReg ctx compatMap reg instr =

@@ -3,7 +3,8 @@ module IR.IRCfgAnalysis (
   CFGBlock (..),
   BlockInOut (..),
   CFGAContext (..),
-  generateCfg, cfgReversePostOrder, cfgLiveInOuts
+  generateCfg, cfgReversePostOrder, cfgLiveInOut,
+  cfgBlocks
 ) where
 
 import qualified Data.Map as Map
@@ -54,7 +55,6 @@ generateCfg (IR.Procedure blocks) = cfgBlocks blocks
 
 ---
 
--- TODO: Change RegAlloc to use this
 data BlockUseDefs a = BlockUseDefs {
   budBlock :: CFGBlock,
   budUses :: Set.Set a,
@@ -122,5 +122,5 @@ blocksLiveInOut' blocks = iterateUntilStable (manyBlocksLiveInOut Map.empty bloc
         BlockInOut liveIn' liveOut'
 
 
-cfgLiveInOuts :: Ord a => CFGAContext a -> ControlFlowGraph -> Map.Map IR.LabelRef (BlockInOut a)
-cfgLiveInOuts ctx cfg = blocksLiveInOut ctx (Map.elems cfg)
+cfgLiveInOut :: Ord a => CFGAContext a -> ControlFlowGraph -> Map.Map IR.LabelRef (BlockInOut a)
+cfgLiveInOut ctx cfg = blocksLiveInOut ctx (Map.elems cfg)

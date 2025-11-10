@@ -71,7 +71,7 @@ run filename outname = do
 
   let ctx = RegAlloc.RegAllocContext X86Reg.intLive X86Reg.regCompat
 
-  let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
+  {- let allInOut :: Map.Map IR.LabelRef (RegAlloc.BlockInOut X86Asm.Register32)
       allInOut = RegAlloc.blocksLiveInOut2 (irBlocks irFinal)
   liftIO $ putStrLn (showAll allInOut)
 
@@ -86,7 +86,7 @@ run filename outname = do
 
   let compatMap = foldl (\m b -> Map.unionWith Set.union m (RegAlloc.compatMap ctx b)) Map.empty (irBlocks irFinal)
   liftIO $ print compatMap
-  liftIO $ print ""
+  liftIO $ print "" -}
 
   let allocatedRegisters = RegAlloc.allocateRegisters ctx (irBlocks irFinal)
   liftIO $ print allocatedRegisters

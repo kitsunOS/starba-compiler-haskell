@@ -161,7 +161,7 @@ phiGen procedure = do
     IRCA.cfgaUses = IRIA.usesV,
     IRCA.cfgaDefs = IRIA.defsV
   }
-  let inOuts = IRCA.cfgLiveInOuts ctx cfg
+  let inOuts = IRCA.cfgLiveInOut ctx cfg
   let pgSourceBlocks = Map.mapWithKey (\labelRef cfgBlock -> PGBlock {
     pgbCFGBlock = cfgBlock,
     pgbInOut = inOuts Map.! labelRef,
